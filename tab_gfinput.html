@@ -1,0 +1,33 @@
+    <!-- ════════════════════════════════════════ TAB: GF_INPUT อัปเดต GFMIS รายวัน ════ -->
+    <div id="tab-gfinput" class="tab">
+      <div class="section-head">
+        <div class="section-title">📊 อัปเดต GFMIS รายวัน</div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span style="font-size:13px;color:var(--text-dim)">กรอกเฉพาะช่อง <b>PO วันนี้</b> และ <b>เบิก วันนี้</b></span>
+          <button class="btn primary" onclick="loadGFInput()"><i class="fas fa-sync-alt"></i> โหลดข้อมูล GF_Input</button>
+          <button class="btn teal-btn" id="gfinput-save-btn" onclick="saveGFInputData()" disabled><i class="fas fa-save"></i> บันทึกและอัปเดต DS2</button>
+        </div>
+      </div>
+      <div id="gfinput-msg" style="margin-bottom:12px;font-size:13px;color:var(--text-dim)">กด "โหลดข้อมูล GF_Input" เพื่อดึงข้อมูลแผนงานปัจจุบัน</div>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="gfinput-table">
+          <thead>
+            <tr>
+              <th style="width:36px">#</th>
+              <th>แผนงาน</th>
+              <th style="width:180px;font-family:'IBM Plex Mono',monospace;font-size:11px">รหัสงบ</th>
+              <th class="num">งบจัดสรร</th>
+              <th class="num" style="color:var(--text-dim)">PO เมื่อวาน</th>
+              <th class="num" style="color:var(--text-dim)">เบิก เมื่อวาน</th>
+              <th class="num" style="color:var(--amber);font-weight:700">PO วันนี้ ✏</th>
+              <th class="num" style="color:var(--teal);font-weight:700">เบิก วันนี้ ✏</th>
+              <th class="num">คงเหลือ (คำนวณ)</th>
+            </tr>
+          </thead>
+          <tbody id="gfinput-tbody">
+            <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-dim)">ยังไม่มีข้อมูล — กดโหลดก่อน</td></tr>
+          </tbody>
+          <tfoot id="gfinput-tfoot"></tfoot>
+        </table>
+      </div>
+    </div>

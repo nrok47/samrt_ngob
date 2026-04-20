@@ -1,0 +1,40 @@
+    <!-- ════ TAB: ADMIN (เนื้อหาย้ายไปใน tab_dashboard → dshpanel-admin) ════ -->
+    <div id="tab-admin" class="tab"></div>
+
+    <!-- ════ MODAL: ADMIN LINE CRUD (ยังคงใช้งานได้จาก dshpanel-admin) ════ -->
+    <div id="modal-admin-crud" class="modal-overlay" style="display:none">
+      <div class="modal-box" style="max-width:480px">
+        <div class="modal-header">
+          <div class="modal-title" id="admin-crud-title">เพิ่มสายบริหาร</div>
+          <button class="modal-close" onclick="closeAdminCrud()">✕</button>
+        </div>
+        <div class="modal-body" style="padding:20px;display:flex;flex-direction:column;gap:14px">
+          <input type="hidden" id="admin-crud-id">
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--navy);display:block;margin-bottom:5px">ชื่อสายบริหาร <span style="color:#e11d48">*</span></label>
+            <input type="text" id="admin-crud-line" class="input-field" placeholder="เช่น รองนิพนธ์, ค่าใช้จ่ายพื้นฐาน">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--navy);display:block;margin-bottom:5px">Pool งบประมาณ <span style="color:#e11d48">*</span></label>
+            <select id="admin-crud-pool" class="input-field" onchange="updateAdminPctHint()">
+              <option value="นโยบาย">นโยบาย (~25.78%)</option>
+              <option value="ยุทธศาสตร์">ยุทธศาสตร์ (~44.22%)</option>
+              <option value="พื้นฐาน">พื้นฐาน (~30%)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--navy);display:block;margin-bottom:5px">สัดส่วนภายใน Pool (%) <span style="color:#e11d48">*</span></label>
+            <input type="number" id="admin-crud-pct" class="input-field" min="0" max="100" step="0.01" placeholder="0–100" oninput="updateAdminPctHint()">
+            <div id="admin-crud-pct-hint" style="font-size:11px;color:var(--text-dim);margin-top:4px">เช่น 50% ใน Pool ยุทธ = ~22.11% ของงบรวม</div>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:var(--navy);display:block;margin-bottom:5px">หมายเหตุ</label>
+            <input type="text" id="admin-crud-note" class="input-field" placeholder="(ไม่บังคับ)">
+          </div>
+        </div>
+        <div class="modal-footer" style="padding:14px 20px;display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" onclick="closeAdminCrud()">ยกเลิก</button>
+          <button class="btn btn-primary" onclick="saveAdminLineCrud()"><i class="fas fa-save"></i> บันทึก</button>
+        </div>
+      </div>
+    </div>

@@ -1,0 +1,27 @@
+    <!-- ════════════════════════════════════════ TAB: LOGS ════ -->
+    <div id="tab-logs" class="tab">
+      <div class="section-head">
+        <div class="section-title">ประวัติการใช้งานระบบ</div>
+        <button class="btn" onclick="loadLogs()"><i class="fas fa-sync-alt"></i> รีเฟรช</button>
+      </div>
+      <div class="table-card" style="padding:0">
+        <table class="log-table" id="log-table">
+          <thead>
+            <tr>
+              <th>เวลา</th>
+              <th>ผู้ใช้</th>
+              <th>Action</th>
+              <th>Module</th>
+              <th>รายละเอียด</th>
+              <th>จำนวน</th>
+              <th>สถานะ</th>
+            </tr>
+          </thead>
+          <tbody id="log-tbody">
+            <tr>
+              <td colspan="7" style="text-align:center;padding:32px;color:var(--text-dim)">กำลังโหลด...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>

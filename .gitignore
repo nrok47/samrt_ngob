@@ -1,0 +1,11 @@
+# Google Apps Script
+.clasp.json
+
+# Design/Backup Folders
+.stitch_hpc_10_strategic_budget_dashboard/
+.claude/
+
+# Spreadsheets and Data
+*.xlsx
+*.xls
+*.csv

@@ -1,0 +1,54 @@
+# Smart ติดตามกำกับงบประมาณ (GFMIS Dashboard) — กฎโปรเจกต์
+
+## โครงสร้างไฟล์
+- **`Code.gs`**: Google Apps Script — ฝั่งเซิร์ฟเวอร์ (อ่าน/เขียนชีท, คำนวณ, API ให้ UI)
+- **`index.html`**: HtmlService — UI แดชบอร์ด (เรียก `google.script.run` ไปที่ฟังก์ชันใน `Code.gs`)
+- โฟลเดอร์นี้เป็น **แหล่งอ้างอิง/ซิงค์กับโปรเจกต์ Apps Script** — หลังแก้ต้อง **Deploy Web app ใหม่** จึงจะเห็นผลบน URL จริง
+
+## บทบาท AI
+- เขียน/รีวิวโค้ดเป็น **JavaScript (ES6+)** สำหรับ Google Apps Script และ UI ฝั่งเบราว์เซอร์
+- เน้นความถูกต้องของข้อมูลงบ, การแยกปีงบ, และประสิทธิภาพการเรียก Google Services
+
+---
+
+## กฎเฉพาะโปรเจกต์นี้ (สำคัญ)
+
+### สเปรดชีตและข้อมูล
+- **Spreadsheet ID** อยู่ใน `CONFIG.SPREADSHEET_ID` — เป็นข้อมูลจริงของระบบ
+- โครงสร้างชีทหลัก: `DS0_Staging`, `DS1_Transactions`, `DS2_MasterBudget`, `DS3_Targets`, `DS4_Logs`, `DS5_AdminAlloc`, `DS6_Activities`, `source` (ดูคอมเมนต์หัวไฟล์ `Code.gs`)
+- **แหล่งข้อมูลหลักคือ Google Sheet** — ไฟล์ `.xlsx` ในโฟลเดอร์เป็นแค่สำเนาอ้างอิง ไม่ได้ถูกอ่านโดย GAS โดยตรงจากเครื่อง
+
+### Web App / การเข้าถึงสเปรดชีต
+- โหมด **Deploy เป็น Web app + HtmlService** — ใน `Code.gs` ใช้ **`SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID)`** ผ่านตัวช่วย `_ss()` เพื่อให้อ่านชีทได้เสมอ
+- **อย่าใช้ `SpreadsheetApp.getActiveSpreadsheet()` เป็นค่าเริ่มต้น** สำหร์บ logic หลักของแดชบอร์ด — ใน Web App มักไม่มี “active spreadsheet”
+- `doGet()` ใช้ `HtmlService.createHtmlOutputFromFile('index')` — ชื่อไฟล์ HTML ในโปรเจกต์ Apps Script ต้องตรงกับ `'index'`
+
+### HtmlService ↔ `google.script.run`
+- ค่าที่ส่งกลับจาก GAS ไปยังเบราว์เซอร์ต้อง **serialize ได้**
+- **ห้ามส่งค่า `Date` ดิบ, `Map`, หรือออบเจ็กต์ที่ไม่รองรับ** — ให้แปลงวันที่เป็น **string** (เช่น ใช้ `Utilities.formatDate` หรือ helper ที่ปลอดภัย) ก่อนคืนใน `getDashboardData` และฟังก์ชันอื่นที่ UI เรียก
+- ถ้า client ได้ `null response` / `deserialize threw error` ให้ตรวจว่ามีฟิลด์ที่ยังเป็น `Date` หรือข้อมูลวงจรใหญ่เกินไปหรือไม่
+
+### ปีงบประมาณ (แยก 2568 / 2569 ไม่ปน)
+- UI เลือกปีจาก dropdown — ค่าที่ต้องการคือ **แยกการทำงานตามปี** ไม่เทียบข้ามปีในหน้าเดียว
+- **DS2 (`DS2_MasterBudget`)**: คอลัมน์ `Fiscal_Year` (ดู `C2.FISCAL_YEAR`) ต้องสอดคล้องกับปีที่ผู้ใช้เลือกตอนนำเข้า/ยืนยัน (`confirmImport`)
+- **DS5 (`DS5_AdminAlloc`)**: คอลัมน์ปีงบ (`C5.YEAR`) ใช้กรองและคำนวณเฉพาะปี — หลีกเลี่ยงการ “fallback แสดงทุกปี” ถ้าจะทำให้ข้อมูลปน
+- การนำเข้ากิจกรรม (`DS6`) และการซิงก์ไป DS5 ต้อง **คำนึงถึงปีงบของรายการ** (เช่น จากวันที่กิจกรรม) ไม่รวมยอดข้ามปีโดยไม่ตั้งใจ
+
+### การตั้งค่าและความปลอดภัย
+- `CONFIG.SYSTEM_PIN` และ `CONFIG.SPREADSHEET_ID` — อย่า hardcode ในโค้ดที่ commit สาธารณะโดยไม่จำเป็น; ถ้าโปรเจกต์เปิดเผย ให้ใช้ Script Properties / แยกไฟล์ config ที่ไม่ commit
+
+---
+
+## มาตรฐานโค้ด (สอดคล้องกฎทั่วไป GAS)
+
+- **ES6+**: `const`/`let`, arrow functions, template literals, destructuring ตามที่เหมาะสม
+- **Naming**: `camelCase` สำหรับฟังก์ชัน/ตัวแปร, `UPPER_CASE` สำหรับค่าคงที่ (เช่น `CONFIG`, `C2`, `C5`)
+- **ประสิทธิภาพ**: ลดการเรียก `SpreadsheetApp` — อ่าน `getValues()` เป็นช่วง, ประมวลผลใน memory, เขียน `setValues()` เป็นชุดเมื่อทำได้; หลีกเลี่ยง `getRange`/`setValue` ในลูปใหญ่เมื่อไม่จำเป็น
+- **Error handling**: ใช้ `try/catch` ในฟังก์ชันที่เรียกบริการ / มี I/O; คืนค่า `{ success: false, message }` ให้ UI แสดงได้
+
+## เอกสาร (JSDoc)
+- ฟังก์ชันที่ถูกเรียกจาก UI (`google.script.run`) ควรมี **JSDoc** ระบุ `@param` และ `@return` อย่างน้อยชื่อฟังก์ชันหลัก
+- Regex หรือ logic คำนวณปีงบ/รหัสงบ — ควรมีคอมเมนต์สั้น ๆ อธิบายความตั้งใจ
+
+## ภาษา UI
+- ข้อความใน UI แสดงผู้ใช้เป็นภาษาไทย (ตามที่โปรเจกต์ใช้อยู่)

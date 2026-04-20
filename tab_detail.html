@@ -1,0 +1,102 @@
+    <!-- ════════════════════════════════════════ TAB: DETAIL ════ -->
+    <div id="tab-detail" class="tab">
+      <div class="section-head">
+        <div>
+          <div class="section-title">รายละเอียดงบประมาณรายรหัส</div>
+          <div class="section-meta" id="detail-meta">-</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="exportTableCSV()"><i class="fas fa-download"></i> Export CSV</button>
+        </div>
+      </div>
+      <div class="table-card">
+        <div class="table-toolbar">
+          <input type="text" id="search-input" placeholder="ค้นหา แผนงาน รหัส กลุ่มงาน..." oninput="filterTable()">
+          <select id="filter-alert" onchange="filterTable()"
+            style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-family:'Sarabun',sans-serif;font-size:13px">
+            <option value="">ทุกสถานะ</option>
+            <option value="red">⚠ ต้องเร่งรัด</option>
+            <option value="yellow">🔸 ต้องติดตาม</option>
+            <option value="green">✅ ปกติ</option>
+          </select>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="data-table" id="detail-table">
+            <thead>
+              <tr>
+                <th onclick="sortTable('plan')">แผนงาน ↕</th>
+                <th>รหัสงบ</th>
+                <th onclick="sortTable('pct')">% เบิกจ่าย ↕</th>
+                <th onclick="sortTable('allocated')" style="text-align:right">จัดสรร (GF) ↕</th>
+                <th onclick="sortTable('paid')" style="text-align:right">เบิกจ่าย (GF) ↕</th>
+                <th onclick="sortTable('ds6PaidOnline')" style="text-align:right;color:#2457a0">เบิกออนไลน์ ↕</th>
+                <th style="text-align:center">ตรงกัน?</th>
+                <th onclick="sortTable('ds6Reserved')" style="text-align:right;color:#0d9488">กันเงิน+เบิก ↕</th>
+                <th onclick="sortTable('ds6Remaining')" style="text-align:right;color:#0d9488">คงเหลือกันเงิน ↕</th>
+              </tr>
+            </thead>
+            <tbody id="detail-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════ สมุดคุมการเบิกจ่าย MODAL ════ -->
+    <div id="modal-budget-ledger"
+      style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:6000;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 12px">
+      <div style="background:var(--surface);border-radius:var(--radius);width:1060px;max-width:98vw;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+
+        <!-- header bar -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:20px 24px 14px;border-bottom:2px solid var(--border)">
+          <div>
+            <div style="font-size:10px;color:var(--text-dim);font-weight:600;letter-spacing:.8px;text-transform:uppercase;margin-bottom:4px">
+              ทะเบียนคุมการเบิกจ่าย เงินงบประมาณ
+            </div>
+            <div style="font-size:16px;font-weight:700;color:var(--navy);line-height:1.3" id="ledger-title">—</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:4px;font-family:'IBM Plex Mono',monospace" id="ledger-code">—</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;margin-left:16px">
+            <button class="btn" onclick="exportLedgerCSV()" style="font-size:12px">
+              <i class="fas fa-file-csv"></i> Export CSV
+            </button>
+            <button onclick="closeModal('modal-budget-ledger')"
+              style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--text-dim);line-height:1;padding:0 4px">×</button>
+          </div>
+        </div>
+
+        <!-- 4 summary cards -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--border)" id="ledger-summary"></div>
+
+        <!-- table -->
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:#f1f5f9">
+                <th style="padding:8px 10px;text-align:center;border-bottom:2px solid var(--border);color:var(--text-dim);width:30px">#</th>
+                <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border);color:var(--text-dim)">โครงการ</th>
+                <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border);color:var(--text-dim)">กิจกรรมดำเนินงาน</th>
+                <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border);color:var(--text-dim);white-space:nowrap">ระยะเวลา</th>
+                <th style="padding:8px 10px;text-align:right;border-bottom:2px solid var(--border);color:var(--text-dim);white-space:nowrap">งบประมาณ (บาท)</th>
+                <th colspan="2" style="padding:8px 10px;text-align:center;border-bottom:2px solid var(--border);color:#0d9488;background:#f0fdfa">กันเงินงบประมาณ</th>
+                <th colspan="2" style="padding:8px 10px;text-align:center;border-bottom:2px solid var(--border);color:#2457a0;background:#eff6ff">เบิกเงินงบประมาณ</th>
+                <th style="padding:8px 10px;text-align:right;border-bottom:2px solid var(--border);color:var(--text-dim);white-space:nowrap">คงเหลือ</th>
+                <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border);color:var(--text-dim)">ผู้รับผิดชอบ</th>
+                <th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--border);color:var(--text-dim)">กลุ่มงาน</th>
+              </tr>
+              <tr style="background:#f8fafc;font-size:11px">
+                <th colspan="5" style="border-bottom:1px solid var(--border)"></th>
+                <th style="padding:5px 8px;text-align:center;border-bottom:1px solid var(--border);color:#0d9488;font-weight:600;background:#f0fdfa">วันเดือนปี</th>
+                <th style="padding:5px 8px;text-align:right;border-bottom:1px solid var(--border);color:#0d9488;font-weight:600;background:#f0fdfa">จำนวน (บาท)</th>
+                <th style="padding:5px 8px;text-align:center;border-bottom:1px solid var(--border);color:#2457a0;font-weight:600;background:#eff6ff">วันเดือนปี</th>
+                <th style="padding:5px 8px;text-align:right;border-bottom:1px solid var(--border);color:#2457a0;font-weight:600;background:#eff6ff">จำนวน (บาท)</th>
+                <th colspan="3" style="border-bottom:1px solid var(--border)"></th>
+              </tr>
+            </thead>
+            <tbody id="ledger-tbody">
+              <tr><td colspan="12" style="padding:28px;text-align:center;color:var(--text-dim)">กำลังโหลด...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="padding:10px 20px;font-size:11px;color:var(--text-dim);border-top:1px solid var(--border)" id="ledger-foot">—</div>
+      </div>
+    </div>

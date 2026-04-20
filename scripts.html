@@ -1,0 +1,3442 @@
+  <script>
+    // ════════════════════════════════════════════════
+    //  STATE
+    // ════════════════════════════════════════════════
+    let _data = null;
+    let _sortCol = '';
+    let _sortDir = 1;
+    let _stagingOk = false;
+    let _activities = [];
+    let _activityEditId = null;
+    let _actPage = 1;
+    let _actTotalPages = 1;
+    let _actPageSize = 20;
+    let _actQuery = '';
+    let _sourceRef = null;
+
+    // ════════════════════════════════════════════════
+    //  AUTH
+    // ════════════════════════════════════════════════
+
+
+    // ════════════════════════════════════════════════
+    //  NAVIGATION
+    // ════════════════════════════════════════════════
+    function switchTab(id, btn) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-' + id).classList.add('active');
+      btn.classList.add('active');
+      if (id === 'logs') loadLogs();
+      if (id === 'admin' || id === 'activities') loadActivities();
+      if (id === 'plan') { loadAdminMappings(); loadPlanData(); }
+    }
+
+    function switchTabById(id) {
+      const btn = document.querySelector(`.nav-btn[onclick*="switchTab('${id}'"]`);
+      if (btn) switchTab(id, btn);
+    }
+
+    // ── Dashboard sub-tab switcher ──
+    const _DASH_PANELS = ['overview','recon','strategic','group','admin'];
+    function switchDashTab(name) {
+      _DASH_PANELS.forEach(n => {
+        const panel = document.getElementById('dshpanel-' + n);
+        const btn   = document.getElementById('dshtab-btn-' + n);
+        if (panel) panel.style.display = n === name ? '' : 'none';
+        if (btn)   btn.classList.toggle('active', n === name);
+      });
+    }
+
+    // ════════════════════════════════════════════════
+    //  LOADING
+    // ════════════════════════════════════════════════
+    function showLoading(msg) {
+      document.getElementById('loading').classList.add('show');
+      document.getElementById('loading-msg').textContent = msg || 'กำลังโหลด...';
+    }
+    function hideLoading() {
+      document.getElementById('loading').classList.remove('show');
+    }
+
+    // ════════════════════════════════════════════════
+    //  DATA LOAD
+    // ════════════════════════════════════════════════
+    const _selectedYear = 2569;
+
+    function loadDashboard() {
+      showLoading('กำลังโหลดข้อมูล ปีงบ 2569...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (!res) {
+            // ถ้าตอบกลับเป็น null ให้ลองเรียก debug/identify เพื่อบอกขั้นที่พัง
+            google.script.run
+              .withSuccessHandler(diag => {
+                const msg = diag && !diag.success
+                  ? `ไม่ได้รับข้อมูลจาก server (null response)\nตรวจพบจุดผิดพลาด: ${diag.step || '-'}\n${diag.message || ''}`
+                  : 'ไม่ได้รับข้อมูลจาก server (null response)';
+                showError(msg);
+              })
+              .withFailureHandler(err => { showError('ไม่ได้รับข้อมูลจาก server (null response) — diagnose failed: ' + (err.message || String(err))); })
+              .identifyDashboardFailure(_selectedYear);
+            return;
+          }
+          if (!res.success) { showError(res.message || 'getDashboardData failed'); return; }
+          _data = res;
+          renderAll(res);
+          initActivitySourceOptions();
+        })
+        .withFailureHandler(err => {
+          hideLoading();
+          showError('GAS Error: ' + (err.message || String(err)));
+        })
+        .getDashboardData(_selectedYear);
+    }
+
+    function refreshData() { loadDashboard(); }
+
+    function renderAll(res) {
+      if (!res || !res.summary) { console.error('renderAll: invalid res', res); return; }
+      const s = res.summary;
+      const _set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      const _setStyle = (id, prop, val) => { const el = document.getElementById(id); if (el) el.style[prop] = val; };
+      const _setAttr = (id, attr, val) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, val); };
+
+      _set('last-update', s.lastUpdate);
+      _set('fiscal-year-label', '2569');
+
+      // KPIs
+      _set('kpi-allocated', fmt(s.allocated));
+      _set('kpi-paid', fmt(s.paid));
+
+      const kpiGfmis = document.getElementById('kpi-gfmis-recon');
+      if (kpiGfmis) {
+        const diff = Number(s.gfmisReconDiff || 0);
+        if (diff <= 1) {
+          kpiGfmis.innerHTML = 'บาท · <span style="color:var(--green)"><i class="fas fa-check-circle"></i> ตรงกับ GFMIS</span>';
+        } else {
+          kpiGfmis.innerHTML = `บาท · <span style="color:var(--rose)" title="GFMIS A–F รวม=${fmt(s.gfmisPaid)} | DS6 A–F=${fmt(s.activityPaidTotal)}"><i class="fas fa-exclamation-triangle"></i> ต่างจาก GFMIS ${fmt(diff)}</span>`;
+        }
+      }
+
+      _set('kpi-po', fmt(s.reserved || 0));
+      _set('kpi-remaining', fmt(s.remaining));
+      _set('kpi-gfmis-paid', fmt(s.grandPaid));
+      _set('kpi-gfmis-alloc', fmt(s.grandAlloc));
+      _set('kpi-rows', s.rowCount);
+
+      // Type breakdown bars (A–F จาก walletBreakdown)
+      const total = s.allocated || 1;
+      const wbMap = {};
+      (res.walletBreakdown || []).forEach(w => { wbMap[w.wtype] = w; });
+      const wtColorMap = { A:'#2457a0', B:'#7c3aed', C:'#0d9488', D:'#d97706', E:'#64748b', F:'#b45309' };
+      const types = ['A','B','C','D','E','F'].map(k => ({
+        label: `${k} ${(wbMap[k]&&wbMap[k].short)||k}`,
+        alloc: wbMap[k] ? wbMap[k].alloc : 0,
+        paid:  wbMap[k] ? wbMap[k].paid  : 0,
+        color: wtColorMap[k],
+      }));
+      const bd = document.getElementById('type-breakdown');
+      bd.innerHTML = '';
+      types.forEach(t => {
+        const pct = t.alloc > 0 ? (t.paid / t.alloc * 100).toFixed(1) : 0;
+        const wPct = (t.alloc / total * 100).toFixed(1);
+        bd.insertAdjacentHTML('beforeend', `
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:130px;font-size:12px;color:var(--text-dim);flex-shrink:0">${t.label}</div>
+        <div style="flex:1;height:8px;background:var(--border);border-radius:99px;overflow:hidden">
+          <div style="height:100%;width:${Math.min(pct, 100)}%;background:${t.color};border-radius:99px;transition:width .8s ease"></div>
+        </div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text);min-width:80px;text-align:right">
+          ${fmt(t.paid)} <span style="color:var(--text-dim)">(${pct}%)</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);min-width:60px;text-align:right">${wPct}% ของงบ</div>
+      </div>`);
+      });
+
+      // Ring
+      const pct = s.paidPct || 0;
+      const target = s.targetPct || 0;
+      const circ = 314;
+      _set('ring-pct-text', pct.toFixed(1) + '%');
+      _setStyle('ring-paid', 'strokeDashoffset', circ - (circ * Math.min(pct, 100) / 100));
+      _setStyle('ring-target', 'strokeDashoffset', circ - (circ * Math.min(target, 100) / 100));
+      const paidColor = pct >= target ? '#0d9488' : pct >= target - 10 ? '#d97706' : '#e11d48';
+      _setAttr('ring-paid', 'stroke', paidColor);
+      _setStyle('pbar-paid', 'width', Math.min(pct, 100) + '%');
+      _setStyle('pbar-target', 'width', Math.min(target, 100) + '%');
+      _set('pbar-paid-val', pct.toFixed(1) + '%');
+      _set('pbar-target-val', target + '%');
+      let recon = '';
+      if (s.adminPaidMode === 'ds6' && s.activityPaidTotal != null && s.ds5PaidSum != null) {
+        const d = Math.abs(Number(s.activityPaidTotal) - Number(s.ds5PaidSum));
+        if (d > 1) {
+          recon = ` · ⚠️ เบิกจ่าย DS6 รวม ${fmt(s.activityPaidTotal)} กับสายบริหาร DS5 ${fmt(s.ds5PaidSum)} ต่างกัน (ชื่อสายบริหารใน DS6 อาจไม่ตรงกับ DS5)`;
+        }
+      }
+      if (s.ds5AllocSum != null && s.opTotalFromA != null) {
+        const d2 = Math.abs(Number(s.ds5AllocSum) - Number(s.opTotalFromA));
+        if (d2 > 1) {
+          recon += ` · ⚠️ จัดสรร DS5 ${fmt(s.ds5AllocSum)} กับ งบ A ใน DS2 ${fmt(s.opTotalFromA)} ต่างกัน (ลองกดรีเคลค์ DS5 หรือตรวจ override)`;
+        }
+      }
+      const linePaidShow = (s.ds5PaidDisplaySum != null && s.ds5PaidDisplaySum !== '')
+        ? s.ds5PaidDisplaySum
+        : (s.ds5PaidSum != null ? s.ds5PaidSum : '-');
+      const modeNote = s.adminPaidMode === 'gfmis_prorata'
+        ? ' · สายบริหาร: แบ่งเบิกจ่าย GFMIS (งบ A) ตามสัดส่วนจัดสรร (ยังไม่มีกันเงิน DS6)'
+        : '';
+      _set('progress-desc', `เบิกจ่ายสะสม (A+B+C+D) ${fmt(s.paid)} บาท จาก ${fmt(s.allocated)} บาท · เป้าเดือน ${s.targetMonth}: ${target}% · รวมตามสาย ${fmt(linePaidShow)}${modeNote}${recon}`);
+
+      // Chart: admin=DS5 สายบริหาร (Panel 2); group chart rendered in renderStrategicPanel (Panel 3)
+      renderSimpleChart('chart-admin', res.adminSummary, target);
+
+      // งบลงทุน section (Type C/F)
+      renderInvestment(res.bInvestment);
+
+      // เบิกแทนกัน note (Type D)
+      _set('reconcile-total', fmt(s.reconcileTotal));
+
+      // Panel 1 — Monthly Trend (reuse exec trend renderer for #dash-trend)
+      renderTrendBars('dash-trend', res.monthlyTrend, target);
+
+      // Panel 2 — Recon panel
+      renderReconPanel(res);
+
+      // Panel 3 — Strategic Progress
+      renderStrategicPanel(res);
+
+      // Tables
+      renderGroupTable(res.adminSummary, target);
+      renderDetailTable(res.tableRows);
+      // Other tabs
+      renderAdminTab(res);
+      renderTransferTab(res);
+      renderExecDashboard(res);
+
+      // Update current round info
+      updateCurrentRoundInfo();
+
+      _set('detail-meta', `แสดง ${res.tableRows.length} รายการ (A+B+C) · อัปเดต ${s.lastUpdate}`);
+    }
+
+    // ════════════════════════════════════════════════
+    //  EXEC DASHBOARD — สรุปผู้บริหาร
+    // ════════════════════════════════════════════════
+    function renderExecDashboard(res) {
+      if (!res || !res.summary) return;
+      const s = res.summary;
+      const target = s.targetPct || 0;
+      const _el = id => document.getElementById(id);
+      const _setTxt = (id, v) => { const e = _el(id); if (e) e.textContent = v; };
+
+      _setTxt('exec-fy', '2569');
+      _setTxt('exec-update', s.lastUpdate || '-');
+
+      // KPI 4 ไพเด่น
+      const pct = s.paidPct || 0;
+      const kpiClr = pct >= target ? 'var(--green)' : pct >= target - 10 ? 'var(--amber)' : 'var(--rose)';
+      const kpiEl = _el('exec-kpi');
+      if (kpiEl) kpiEl.innerHTML = [
+        { label: 'งบดำเนินงาน (A+B+C+D)', val: fmt(s.allocated), color: 'var(--navy)', sub: '' },
+        { label: 'ยอด PO / กันเงิน (DS6)', val: fmt(s.reserved || 0), color: '#7c3aed', sub: 'ทุกสถานะ ยกเว้น ยกเลิก' },
+        { label: 'เบิกจ่ายสะสม (DS6)', val: fmt(s.paid), color: 'var(--teal)', sub: 'สถานะ: เบิกจ่ายแล้ว' },
+        { label: '% เบิกจ่าย', val: pct.toFixed(1) + '%', color: kpiClr, sub: 'เป้า ' + target + '%' },
+      ].map(k => `
+    <div style="background:var(--surface);border-radius:var(--radius);padding:20px 22px;
+         box-shadow:var(--shadow);border:1px solid var(--border);border-top:3px solid ${k.color}">
+      <div style="font-size:12px;color:var(--text-dim);font-weight:500;margin-bottom:8px">${k.label}</div>
+      <div style="font-size:22px;font-weight:700;color:${k.color};font-family:'IBM Plex Mono',monospace">${k.val}</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${k.sub || ''}</div>
+    </div>`).join('');
+
+      // Monthly Trend bars — use shared renderer
+      renderTrendBars('exec-trend', res.monthlyTrend, target);
+
+      // Pool Cards — แสดงงบรวม 3 กลุ่ม: ดำเนินงาน (A+B+C+D) / บุคลากร (E) / ลงทุน (F)
+      const pcEl = _el('exec-pool-cards');
+      if (pcEl && res.walletBreakdown && res.walletBreakdown.length) {
+        pcEl.innerHTML = '';
+        const wbAll = {};
+        res.walletBreakdown.forEach(w => { wbAll[w.wtype] = w; });
+        const opAlloc = ['A','B','C','D'].reduce((s,k) => s + (wbAll[k]?wbAll[k].alloc:0), 0);
+        const opPaid  = ['A','B','C','D'].reduce((s,k) => s + (wbAll[k]?wbAll[k].paid:0), 0);
+        const opPct   = opAlloc > 0 ? opPaid/opAlloc*100 : 0;
+        const eW = wbAll['E'] || { alloc:0, paid:0, pct:0 };
+        const fW = wbAll['F'] || { alloc:0, paid:0, pct:0 };
+        [
+          { label:'งบดำเนินงาน (A+B+C+D)', sub:`รายงานกรม รบจ. ทุกวันที่ 15`, alloc:opAlloc, paid:opPaid, pct:opPct, color:'#2457a0', isRBJ:true },
+          { label:'งบบุคลากร (E)', sub:'เงินเดือน / ค่าตอบแทน', alloc:eW.alloc, paid:eW.paid, pct:eW.pct, color:'#64748b', isRBJ:false },
+          { label:'งบลงทุน (F)', sub:'ครุภัณฑ์ / สิ่งก่อสร้าง', alloc:fW.alloc, paid:fW.paid, pct:fW.pct, color:'#b45309', isRBJ:false },
+        ].forEach(p => {
+          const pc = p.pct || 0;
+          const clr = p.isRBJ
+            ? (pc >= target ? 'var(--green)' : pc >= target-10 ? 'var(--amber)' : 'var(--rose)')
+            : '#64748b';
+          pcEl.insertAdjacentHTML('beforeend', `
+        <div class="chart-card" style="padding:18px 20px;border-top:3px solid ${p.color}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+            <div>
+              <div style="font-size:13px;font-weight:700;color:var(--navy)">${p.label}</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px">${p.sub}</div>
+            </div>
+            <div style="font-size:22px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${clr}">${pc.toFixed(1)}%</div>
+          </div>
+          <div style="height:6px;background:var(--border);border-radius:99px;overflow:hidden;margin-bottom:8px">
+            <div style="height:100%;width:${Math.min(pc,100)}%;background:${p.isRBJ?clr:p.color};border-radius:99px;opacity:0.7;transition:width .8s"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim)">
+            <span>จัดสรร ${fmt(p.alloc)}</span><span>เบิก ${fmt(p.paid)}</span>
+          </div>
+          ${p.isRBJ ? `<div style="font-size:10px;color:var(--green);margin-top:6px;font-weight:600">● นับใน % รบจ. · เป้า ${target}%</div>` : ''}
+        </div>`);
+        });
+      }
+
+      // ════ Wallet Breakdown A–F ════
+      const walletTbody = _el('exec-wallet-tbody');
+      const walletTfoot = _el('exec-wallet-tfoot');
+      const rbjPctEl    = _el('exec-rbj-pct');
+      const rbjTgtEl    = _el('exec-rbj-target');
+      const rbjGauge    = _el('exec-rbj-gauge');
+
+      if (walletTbody && res.walletBreakdown && res.walletBreakdown.length) {
+        const rows = res.walletBreakdown.filter(w => w.wtype !== 'X' || w.alloc > 0);
+        let rbjAlloc = 0, rbjPaid = 0, rbjPaidDS6 = 0, totalAlloc = 0;
+
+        walletTbody.innerHTML = rows.map(w => {
+          const pctG  = w.pct    || 0;   // % จาก GFMIS
+          const pctD  = w.pctDS6 || 0;   // % จาก DS6
+          // ใช้ GFMIS เป็นหลักสำหรับ bar + สี (ถ้ายังไม่มี DS6)
+          const pctBar = pctG > 0 ? pctG : pctD;
+          const barClr = pctBar >= target ? '#0d9488' : pctBar >= target - 10 ? '#d97706' : '#e11d48';
+          const rbjMark = w.inRBJ
+            ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#0d9488;vertical-align:middle" title="นับรวมใน % รบจ."></span>`
+            : `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#e2e8f0;vertical-align:middle" title="ไม่นับใน รบจ."></span>`;
+          if (w.inRBJ) { rbjAlloc += w.alloc; rbjPaid += w.paidGFMIS; rbjPaidDS6 += w.paidDS6; }
+          totalAlloc += w.alloc;
+
+          // diff badge ระหว่าง 2 แหล่ง
+          const diff = (w.paidGFMIS || 0) - (w.paidDS6 || 0);
+          const diffAbs = Math.abs(diff);
+          const diffBadge = diffAbs > 0 && w.alloc > 0
+            ? `<span style="font-size:10px;padding:1px 5px;border-radius:4px;margin-left:4px;background:${diffAbs/w.alloc > 0.05?'#fff5f5':'#f1f5f9'};color:${diffAbs/w.alloc > 0.05?'#b91c1c':'#94a3b8'}" title="ผลต่าง GFMIS − กันเงิน">Δ ${fmt(diffAbs)}</span>`
+            : '';
+
+          return `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:8px 10px">
+              <span style="display:inline-block;min-width:26px;text-align:center;padding:3px 7px;border-radius:6px;font-weight:800;font-size:13px;background:${w.bg||'#f1f5f9'};color:${w.color||'#475569'}">${w.wtype}</span>
+            </td>
+            <td style="padding:8px 10px">
+              <div style="font-weight:600;color:var(--navy)">${w.label}</div>
+              <div style="font-size:11px;color:var(--text-dim)">${w.short}${w.count > 0 ? ` · ${w.count} รหัสงบ` : ''}${diffBadge}</div>
+            </td>
+            <td style="padding:8px 10px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px">${fmt(w.alloc)}</td>
+            <td style="padding:8px 10px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#2457a0;font-weight:600">
+              ${fmt(w.paidGFMIS)}
+              <div style="font-size:10px;color:${w.inRBJ?barClr:'#94a3b8'};font-weight:400">${pctG.toFixed(1)}%</div>
+            </td>
+            <td style="padding:8px 10px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#0d9488;font-weight:600">
+              ${fmt(w.paidDS6)}
+              <div style="font-size:10px;color:${w.inRBJ?barClr:'#94a3b8'};font-weight:400">${pctD.toFixed(1)}%</div>
+            </td>
+            <td style="padding:8px 10px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="flex:1;height:10px;background:#f1f5f9;border-radius:99px;overflow:hidden;position:relative">
+                  <div style="position:absolute;height:100%;width:${Math.min(pctBar,100)}%;background:${w.inRBJ?barClr:'#94a3b8'};border-radius:99px;opacity:0.35"></div>
+                  <div style="position:absolute;height:100%;width:${Math.min(pctD,100)}%;background:${w.inRBJ?'#0d9488':'#94a3b8'};border-radius:99px;opacity:0.8"></div>
+                </div>
+                <span style="font-size:11px;font-weight:700;color:${w.inRBJ?barClr:'var(--text-dim)'};min-width:34px;text-align:right">${pctBar.toFixed(1)}%</span>
+              </div>
+              <div style="font-size:10px;color:var(--text-dim);margin-top:2px;padding-left:2px">
+                <span style="color:#2457a0">▬ GFMIS</span> &nbsp; <span style="color:#0d9488">▬ กันเงิน</span>
+              </div>
+            </td>
+            <td style="padding:8px 10px;text-align:center">${rbjMark}</td>
+          </tr>`;
+        }).join('');
+
+        // subtotal row A+B+C+D
+        const rbjPct    = rbjAlloc > 0 ? (rbjPaid / rbjAlloc * 100) : 0;
+        const rbjPctDS6 = rbjAlloc > 0 ? (rbjPaidDS6 / rbjAlloc * 100) : 0;
+        const rbjClr = rbjPct >= target ? '#166534' : rbjPct >= target - 10 ? '#92400e' : '#991b1b';
+        const rbjBg  = rbjPct >= target ? '#f0fdf4' : rbjPct >= target - 10 ? '#fffbeb' : '#fff5f5';
+
+        if (walletTfoot) walletTfoot.innerHTML = `
+          <tr style="border-top:2px solid var(--border);background:${rbjBg};font-weight:700">
+            <td colspan="2" style="padding:10px 10px;color:${rbjClr}">รวม A+B+C+D (งบดำเนินงาน — รบจ.)</td>
+            <td style="padding:10px 10px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;color:${rbjClr}">${fmt(rbjAlloc)}</td>
+            <td style="padding:10px 10px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#2457a0">
+              ${fmt(rbjPaid)}<div style="font-size:10px;color:${rbjClr};font-weight:400">${rbjPct.toFixed(1)}%</div>
+            </td>
+            <td style="padding:10px 10px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#0d9488">
+              ${fmt(rbjPaidDS6)}<div style="font-size:10px;color:${rbjClr};font-weight:400">${rbjPctDS6.toFixed(1)}%</div>
+            </td>
+            <td colspan="2" style="padding:10px 10px;color:${rbjClr};font-size:15px;font-family:'IBM Plex Mono',monospace">
+              ${rbjPct.toFixed(1)}% <span style="font-size:11px;font-weight:400">(เป้า ${target}%)</span>
+            </td>
+          </tr>`;
+
+        // อัปเดต gauge
+        if (rbjPctEl) { rbjPctEl.textContent = rbjPct.toFixed(1) + '%'; rbjPctEl.style.color = rbjClr; }
+        if (rbjTgtEl) rbjTgtEl.textContent = target;
+        if (rbjGauge) {
+          const gaugeBorder = rbjPct >= target ? '#86efac' : rbjPct >= target-10 ? '#fde68a' : '#fca5a5';
+          rbjGauge.style.borderColor = gaugeBorder;
+          rbjGauge.style.background  = rbjBg;
+          rbjGauge.style.color = rbjClr;
+        }
+      }
+
+      // Group breakdown bars
+      const gbEl = _el('exec-group-bars');
+      if (gbEl) {
+        gbEl.innerHTML = '';
+        const groups = res.groupSummary || [];
+        if (!groups.length) {
+          gbEl.innerHTML = '<div style="color:var(--text-dim);font-size:13px;text-align:center;padding:20px">ยังไม่มีข้อมูลสมุดกันเงิน DS6 สำหรับปีนี้</div>';
+          return;
+        }
+        const maxPaid = Math.max(...groups.map(g => g.paid), 1);
+        groups.forEach(g => {
+          const w = (g.paid / maxPaid * 100).toFixed(1);
+          const clr = g.alert === 'green' ? '#0d9488' : g.alert === 'yellow' ? '#d97706' : '#e11d48';
+          gbEl.insertAdjacentHTML('beforeend', `
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:140px;font-size:12px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0" title="${g.label}">${g.label}</div>
+          <div style="flex:1;height:20px;background:#f1f5f9;border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:${w}%;background:${clr};border-radius:4px;display:flex;align-items:center;padding-left:6px;transition:width .6s;min-width:2px">
+              <span style="font-size:10px;color:white;font-weight:600;white-space:nowrap">${fmt(g.paid)} (${g.paidPct}%)</span>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);min-width:80px;text-align:right;font-family:'IBM Plex Mono',monospace">${fmt(g.allocated)}</div>
+        </div>`);
+        });
+      }
+    }
+
+    function renderInvestment(data) {
+      if (!data || !data.length) {
+        document.getElementById('invest-section').style.display = 'none';
+        return;
+      }
+      document.getElementById('invest-section').style.display = '';
+      const totalAlloc = data.reduce((s, r) => s + r.allocated, 0);
+      const totalPaid = data.reduce((s, r) => s + r.paid, 0);
+      const overallPct = totalAlloc > 0 ? (totalPaid / totalAlloc * 100).toFixed(1) : 0;
+      document.getElementById('invest-summary').innerHTML =
+        `จัดสรร <b>${fmt(totalAlloc)}</b> | เบิกจ่าย <b>${fmt(totalPaid)}</b> | <b>${overallPct}%</b>`;
+      const tbody = document.getElementById('invest-tbody');
+      tbody.innerHTML = '';
+      data.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+      <td style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim)">${r.id}</td>
+      <td style="font-size:13px">${r.plan}</td>
+      <td class="num">${fmt(r.allocated)}</td>
+      <td class="num">${fmt(r.paid)}</td>
+      <td>
+        <div class="mini-bar-wrap">
+          <div class="mini-bar-track">
+            <div class="mini-bar-fill" style="width:${Math.min(r.pct, 100)}%;background:${r.pct >= 100 ? '#2457a0' : '#64748b'}"></div>
+          </div>
+          <span class="mini-bar-lbl">${r.pct}%</span>
+        </div>
+      </td>
+      <td style="font-size:11px;color:var(--text-dim)">${r.lastUpdate}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // ════════════════════════════════════════════════
+    //  TREND BARS — shared renderer for Panel 1 & Exec tab
+    // ════════════════════════════════════════════════
+    function renderTrendBars(containerId, monthlyTrend, target) {
+      const el = document.getElementById(containerId);
+      if (!el) return;
+      if (!monthlyTrend || !monthlyTrend.length) {
+        el.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">ยังไม่มีข้อมูลแนวโน้มรายเดือน</div>';
+        return;
+      }
+      el.innerHTML = '';
+      const barH = 100;
+      const maxPct = Math.max(...monthlyTrend.map(m => Math.max(m.paidCumPct || 0, m.targetCumPct || 0)), 20);
+      monthlyTrend.forEach(m => {
+        const isCur = m.isCurrent || false;
+        const tgt  = m.targetCumPct != null ? m.targetCumPct : 0;
+        const paid = m.paidCumPct || 0;
+        const clr  = !m.isPast ? '#cbd5e1'
+          : paid >= tgt ? '#0d9488'
+          : paid >= tgt - 10 ? '#d97706' : '#e11d48';
+        const tgtPx  = tgt  > 0 ? Math.round((tgt  / maxPct) * barH) : 0;
+        const paidPx = paid > 0 ? Math.round((paid / maxPct) * barH) : 0;
+        el.insertAdjacentHTML('beforeend', `
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:48px;
+             ${isCur ? 'background:#f5f3ff;border-radius:8px;padding:4px 2px' : ''}">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;color:${clr};min-height:14px">
+            ${m.isPast && paid > 0 ? paid.toFixed(0) + '%' : ''}
+          </div>
+          <div style="position:relative;width:32px;height:${barH}px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;overflow:hidden;flex-shrink:0">
+            ${tgtPx > 0 ? `<div style="position:absolute;bottom:0;width:100%;height:${tgtPx}px;background:#e2e8f0;border-radius:4px;"></div>` : ''}
+            <div style="position:absolute;bottom:0;width:100%;height:${paidPx}px;background:${clr};border-radius:4px;transition:height .6s;"></div>
+          </div>
+          <div style="font-size:11px;color:${isCur ? 'var(--navy)' : 'var(--text-dim)'};font-weight:${isCur ? 700 : 400}">${m.month}</div>
+          <div style="font-size:9px;color:#94a3b8">${tgt > 0 ? tgt + '%' : ''}</div>
+        </div>`);
+      });
+    }
+
+    // ════════════════════════════════════════════════
+    //  PANEL 2 — กระทบยอด GFMIS
+    // ════════════════════════════════════════════════
+    function renderReconPanel(res) {
+      if (!res || !res.summary) return;
+      const s = res.summary;
+      const _el  = id => document.getElementById(id);
+      const _set = (id, v) => { const e = _el(id); if (e) e.textContent = v; };
+
+      // GFMIS paid (grandPaid = GFMIS A-F from DS2)
+      _set('kpi-gfmis-paid', fmt(s.grandPaid));
+      _set('kpi-gfmis-alloc', fmt(s.grandAlloc));
+
+      // DS6 A-F paid (activityPaidTotal)
+      _set('recon-ds6-paid', fmt(s.activityPaidTotal));
+
+      // Diff
+      const diff = Number(s.gfmisReconDiff || 0);
+      _set('recon-diff-val', fmt(diff));
+      const noteEl = _el('recon-diff-note');
+      if (noteEl) {
+        if (diff <= 1) {
+          noteEl.innerHTML = '<span style="color:var(--green)"><i class="fas fa-check-circle"></i> ตรงกับ GFMIS ✓</span>';
+        } else {
+          const pct = s.grandPaid > 0 ? (diff / s.grandPaid * 100).toFixed(1) : '-';
+          noteEl.innerHTML = `<span style="color:var(--rose)"><i class="fas fa-exclamation-triangle"></i> ต่างกัน ${pct}% — ตรวจสอบสถานะกันเงิน</span>`;
+        }
+      }
+
+      // Summary list (right side card)
+      const listEl = _el('recon-summary-list');
+      if (listEl) {
+        const items = [
+          { label:'งบรวม (GFMIS grandAlloc)', val: fmt(s.grandAlloc), color:'var(--navy)' },
+          { label:'เบิก GFMIS (A–F)', val: fmt(s.grandPaid), color:'#2457a0' },
+          { label:'กันเงิน DS6 เบิกแล้ว (A–F)', val: fmt(s.activityPaidTotal), color:'#0d9488' },
+          { label:'D — เบิกแทนกัน', val: fmt(s.reconcileTotal), color:'#d97706' },
+          { label:'คงเหลือ', val: fmt(s.remaining), color:'var(--rose)' },
+        ];
+        listEl.innerHTML = items.map(it => `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+            <span style="color:var(--text-dim)">${it.label}</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-weight:700;color:${it.color}">${it.val}</span>
+          </div>`).join('');
+      }
+    }
+
+    // ════════════════════════════════════════════════
+    //  PANEL 3 — ความก้าวหน้ายุทธศาสตร์
+    // ════════════════════════════════════════════════
+    function renderStrategicPanel(res) {
+      if (!res || !res.summary) return;
+      const s      = res.summary;
+      const target = s.targetPct || 0;
+      const wbMap  = {};
+      (res.walletBreakdown || []).forEach(w => { wbMap[w.wtype] = w; });
+
+      // A / B / C cards
+      const abcEl = document.getElementById('strategic-abc-cards');
+      if (abcEl) {
+        const WDEF = {
+          A: { label:'ยุทธศาสตร์กลุ่มงาน',   sub:'1.x — แผนงานเชิงกลยุทธ์',  color:'#2457a0', bg:'#eff6ff' },
+          B: { label:'นโยบายกรม',             sub:'2.x — นโยบาย/โครงการพิเศษ', color:'#7c3aed', bg:'#f5f3ff' },
+          C: { label:'ค่าใช้จ่ายพื้นฐาน',    sub:'3.x — งานประจำบังคับ',       color:'#0d9488', bg:'#f0fdfa' },
+        };
+        abcEl.innerHTML = Object.entries(WDEF).map(([k, def]) => {
+          const w    = wbMap[k] || { alloc:0, paid:0, pct:0, paidDS6:0 };
+          const pct  = w.pct  || 0;
+          const pctD = w.pctDS6 || 0;
+          const clr  = pct >= target ? 'var(--green)' : pct >= target-10 ? 'var(--amber)' : 'var(--rose)';
+          return `
+          <div style="background:var(--surface);border-radius:var(--radius);padding:20px 22px;
+               box-shadow:var(--shadow);border:1px solid var(--border);border-top:4px solid ${def.color}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                  <span style="background:${def.bg};color:${def.color};font-weight:800;font-size:13px;padding:3px 10px;border-radius:6px">Type ${k}</span>
+                  <span style="font-size:13px;font-weight:700;color:var(--navy)">${def.label}</span>
+                </div>
+                <div style="font-size:11px;color:var(--text-dim)">${def.sub}</div>
+              </div>
+              <div style="font-size:28px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${clr}">${pct.toFixed(1)}%</div>
+            </div>
+            <!-- dual bar: GFMIS vs DS6 -->
+            <div style="margin-bottom:8px">
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-bottom:3px">
+                <span>GFMIS</span><span>${pct.toFixed(1)}%</span>
+              </div>
+              <div style="height:7px;background:var(--border);border-radius:99px;overflow:hidden;margin-bottom:4px">
+                <div style="height:100%;width:${Math.min(pct,100)}%;background:${def.color};opacity:.5;border-radius:99px;transition:width .8s"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-bottom:3px">
+                <span>กันเงิน DS6</span><span>${pctD.toFixed(1)}%</span>
+              </div>
+              <div style="height:7px;background:var(--border);border-radius:99px;overflow:hidden">
+                <div style="height:100%;width:${Math.min(pctD,100)}%;background:${def.color};border-radius:99px;transition:width .8s"></div>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim)">
+              <span>จัดสรร ${fmt(w.alloc)}</span>
+              <span style="color:${def.color};font-weight:600">เบิก GFMIS ${fmt(w.paidGFMIS || 0)}</span>
+            </div>
+          </div>`;
+        }).join('');
+      }
+
+      // Type D row
+      const dW = wbMap['D'] || { alloc:0, paid:0, pct:0, paidDS6:0 };
+      const dEl = id => document.getElementById(id);
+      const dSet = (id, v) => { const e = dEl(id); if (e) e.textContent = v; };
+      dSet('strat-d-paid', fmt(dW.paidDS6 || 0));
+      dSet('strat-d-alloc', fmt(dW.alloc));
+      dSet('strat-d-pct', (dW.pct || 0).toFixed(1) + '%');
+      const dBar = dEl('strat-d-bar');
+      if (dBar) dBar.style.width = Math.min(dW.pct || 0, 100) + '%';
+
+      // Group bars (strat-group-bars)
+      const gbEl = document.getElementById('strat-group-bars');
+      if (gbEl) {
+        gbEl.innerHTML = '';
+        const groups = res.groupSummary || [];
+        if (!groups.length) {
+          gbEl.innerHTML = '<div style="color:var(--text-dim);font-size:13px;text-align:center;padding:20px">ยังไม่มีข้อมูลสมุดกันเงิน DS6</div>';
+        } else {
+          const maxPaid = Math.max(...groups.map(g => g.paid), 1);
+          groups.forEach(g => {
+            const w   = (g.paid / maxPaid * 100).toFixed(1);
+            const clr = g.alert === 'green' ? '#0d9488' : g.alert === 'yellow' ? '#d97706' : '#e11d48';
+            gbEl.insertAdjacentHTML('beforeend', `
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="width:140px;font-size:12px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0" title="${g.label}">${g.label}</div>
+              <div style="flex:1;height:20px;background:#f1f5f9;border-radius:4px;overflow:hidden">
+                <div style="height:100%;width:${w}%;background:${clr};border-radius:4px;display:flex;align-items:center;padding-left:6px;transition:width .6s;min-width:2px">
+                  <span style="font-size:10px;color:white;font-weight:600;white-space:nowrap">${fmt(g.paid)} (${g.paidPct}%)</span>
+                </div>
+              </div>
+              <div style="font-size:11px;color:var(--text-dim);min-width:80px;text-align:right;font-family:'IBM Plex Mono',monospace">${fmt(g.allocated)}</div>
+            </div>`);
+          });
+        }
+      }
+
+      // Group chart (chart-group canvas) — reuse renderSimpleChart
+      renderSimpleChart('chart-group', res.groupSummary || [], target);
+    }
+
+    // ════════════════════════════════════════════════
+    //  CHARTS
+    // ════════════════════════════════════════════════
+
+    function renderSimpleChart(canvasId, data, target) {
+      // แสดงข้อมูลเป็น div bars แทน Chart.js canvas
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const parent = canvas.parentElement;
+      if (!parent) return;
+
+      // ซ่อน canvas แล้วแสดง div bars แทน
+      canvas.style.display = 'none';
+
+      // ลบ bars เก่า
+      const oldBars = parent.querySelector('.simple-bars');
+      if (oldBars) oldBars.remove();
+
+      const wrap = document.createElement('div');
+      wrap.className = 'simple-bars';
+      wrap.style.cssText = 'padding:8px 0';
+
+      (data || []).slice(0, 8).forEach(d => {
+        // สายบริหาร: ใช้ % เบิกจ่ายจริง (paidPct) ไม่ใช่ Pool_Pct ในคอลัมน์ pct
+        const raw = (d.paidPct != null && !isNaN(d.paidPct)) ? Number(d.paidPct) : Number(d.pct || 0);
+        const pct = Math.min(raw, 100);
+        const color = pct >= target ? '#0d9488' : pct >= target - 10 ? '#d97706' : '#e11d48';
+        const lbl = d.label || d.line || '';
+        wrap.insertAdjacentHTML('beforeend', `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <div style="width:110px;font-size:12px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+             title="${lbl}">${lbl}</div>
+        <div style="flex:1;height:18px;background:#f1f5f9;border-radius:4px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${color};border-radius:4px;transition:width .6s;display:flex;align-items:center;padding:0 6px">
+            <span style="font-size:10px;color:white;font-weight:600;white-space:nowrap">${pct.toFixed(1)}%</span>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);min-width:70px;text-align:right;font-family:'IBM Plex Mono',monospace">${fmt(d.allocated)}</div>
+      </div>`);
+      });
+
+      // เส้นเป้าหมาย
+      wrap.insertAdjacentHTML('beforeend',
+        `<div style="font-size:11px;color:#2457a0;margin-top:4px">เส้นเป้าหมาย: ${target}%</div>`);
+      parent.appendChild(wrap);
+    }
+
+    // ════════════════════════════════════════════════
+    //  TABLES
+    // ════════════════════════════════════════════════
+    function renderGroupTable(data, target) {
+      const tbody = document.getElementById('group-tbody');
+      tbody.innerHTML = '';
+      data.forEach(d => {
+        const raw = (d.paidPct != null && !isNaN(d.paidPct)) ? Number(d.paidPct) : Number(d.pct || 0);
+        const pct = +raw.toFixed(1);
+        const alert = pct >= target ? 'green' : pct >= target - 10 ? 'yellow' : 'red';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+      <td><b>${d.label || d.line || '-'}</b></td>
+      <td class="num">${fmt(d.allocated)}</td>
+      <td class="num">${fmt(d.paid)}</td>
+      <td>
+        <div class="mini-bar-wrap">
+          <div class="mini-bar-track">
+            <div class="mini-bar-fill" style="width:${Math.min(pct, 100)}%;background:${alert === 'green' ? '#0d9488' : alert === 'yellow' ? '#d97706' : '#e11d48'}"></div>
+          </div>
+          <span class="mini-bar-lbl">${pct}%</span>
+        </div>
+      </td>
+      <td>${alertBadge(alert, pct, target)}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    let _detailRows = [];
+    function renderDetailTable(rows) {
+      _detailRows = rows;
+      _renderDetailRows(rows);
+    }
+
+    function _matchBadge(matchStatus, ds6Paid, gfPaid) {
+      if (matchStatus === 'none') return '<span style="font-size:11px;color:var(--text-dim)">—</span>';
+      if (matchStatus === 'exact') return '<span style="font-size:11px;padding:2px 7px;border-radius:10px;background:#d1fae5;color:#065f46;font-weight:600">✅ ตรง</span>';
+      if (matchStatus === 'near') {
+        const diff = Math.abs(ds6Paid - gfPaid);
+        return `<span style="font-size:11px;padding:2px 7px;border-radius:10px;background:#fef9c3;color:#854d0e;font-weight:600" title="ต่าง ${fmt(diff)} บาท">⚠ ใกล้เคียง</span>`;
+      }
+      const diff = Math.abs(ds6Paid - gfPaid);
+      return `<span style="font-size:11px;padding:2px 7px;border-radius:10px;background:#fee2e2;color:#991b1b;font-weight:600" title="ต่าง ${fmt(diff)} บาท">❌ ไม่ตรง</span>`;
+    }
+
+    function _renderDetailRows(rows) {
+      const tbody = document.getElementById('detail-tbody');
+      tbody.innerHTML = '';
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.dataset.alert = r.alert;
+        const ds6Rem = r.ds6Remaining ?? 0;
+        const remColor = ds6Rem < 0 ? '#e11d48' : ds6Rem === 0 ? 'var(--text-dim)' : '#0d9488';
+        tr.innerHTML = `
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.plan}">${r.plan}</td>
+      <td class="code-cell">
+        <div style="display:flex;align-items:center;gap:5px">
+          <span title="${r.code}" style="flex:1;overflow:hidden;text-overflow:ellipsis">${r.code}</span>
+          <button data-code="${r.code}" onclick="openBudgetLedger(this.dataset.code)"
+            title="เปิดสมุดคุมการเบิกจ่าย"
+            style="flex-shrink:0;padding:2px 7px;font-size:11px;border:1px solid #bfdbfe;background:#eff6ff;color:#2457a0;border-radius:5px;cursor:pointer;font-family:'Sarabun',sans-serif;line-height:1.4">
+            📒 สมุดคุม
+          </button>
+        </div>
+      </td>
+      <td>
+        <div class="mini-bar-wrap">
+          <div class="mini-bar-track">
+            <div class="mini-bar-fill" style="width:${Math.min(r.pct, 100)}%;background:${r.alert === 'green' ? '#0d9488' : r.alert === 'yellow' ? '#d97706' : '#e11d48'}"></div>
+          </div>
+          <span class="mini-bar-lbl">${r.pct}%</span>
+        </div>
+      </td>
+      <td class="num">${fmt(r.allocated)}</td>
+      <td class="num">${fmt(r.paid)}</td>
+      <td class="num" style="color:#2457a0">${fmt(r.ds6PaidOnline ?? 0)}</td>
+      <td style="text-align:center">${_matchBadge(r.matchStatus, r.ds6PaidOnline ?? 0, r.paid)}</td>
+      <td class="num" style="color:#0d9488">${fmt(r.ds6Reserved ?? 0)}</td>
+      <td class="num" style="color:${remColor};font-weight:${ds6Rem < 0 ? '700' : '400'}">${fmt(ds6Rem)}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterTable() {
+      const q = document.getElementById('search-input').value.toLowerCase();
+      const alert = document.getElementById('filter-alert').value;
+      const rows = _detailRows.filter(r => {
+        const match = !q || [r.plan, r.code].some(v => (v || '').toLowerCase().includes(q));
+        const alertMatch = !alert || r.alert === alert;
+        return match && alertMatch;
+      });
+      _renderDetailRows(rows);
+    }
+
+    function sortTable(col) {
+      if (_sortCol === col) _sortDir *= -1;
+      else { _sortCol = col; _sortDir = 1; }
+      const sorted = [..._detailRows].sort((a, b) => {
+        const av = a[col]; const bv = b[col];
+        return typeof av === 'number' ? (av - bv) * _sortDir : String(av).localeCompare(String(bv)) * _sortDir;
+      });
+      _renderDetailRows(sorted);
+    }
+
+    function exportTableCSV() {
+      if (!_detailRows.length) return;
+      const headers = ['แผนงาน','รหัสงบ','%เบิกจ่าย','จัดสรร(GF)','เบิกจ่าย(GF)','เบิกออนไลน์(DS6)','ตรงกัน','กันเงิน+เบิก','คงเหลือกันเงิน'];
+      const rows = _detailRows.map(r => [
+        `"${(r.plan||'').replace(/"/g,'""')}"`,
+        `"${(r.code||'').replace(/"/g,'""')}"`,
+        r.pct, r.allocated, r.paid,
+        r.ds6PaidOnline ?? 0,
+        r.matchStatus === 'exact' ? 'ตรง' : r.matchStatus === 'near' ? 'ใกล้เคียง' : r.matchStatus === 'diff' ? 'ไม่ตรง' : '-',
+        r.ds6Reserved ?? 0, r.ds6Remaining ?? 0,
+      ]);
+      let csv = '\uFEFF' + headers.join(',') + '\n' + rows.map(r => r.join(',')).join('\n');
+      const a = document.createElement('a');
+      a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+      a.download = 'budget_detail_export.csv';
+      a.click();
+    }
+
+    // ════════════════════════════════════════════════
+    //  GF_INPUT TAB — อัปเดต GFMIS รายวัน
+    // ════════════════════════════════════════════════
+    let _gfRows = []; // cache ข้อมูลจาก getGFInputRows
+
+    function loadGFInput() {
+      const msg = document.getElementById('gfinput-msg');
+      msg.textContent = '⏳ กำลังโหลดข้อมูลจาก GF_Input...';
+      msg.style.color = 'var(--text-dim)';
+      showLoading('กำลังโหลดข้อมูล GF_Input...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (!res || !res.success) {
+            msg.textContent = '❌ ' + (res && res.message ? res.message : 'โหลดไม่สำเร็จ');
+            msg.style.color = 'var(--rose)';
+            return;
+          }
+          _gfRows = res.rows || [];
+          _renderGFInputTable(_gfRows);
+          msg.textContent = `✅ โหลดสำเร็จ ${_gfRows.length} แผนงาน — แก้ไขช่อง PO วันนี้ และ เบิก วันนี้ แล้วกด บันทึก`;
+          msg.style.color = 'var(--green)';
+          document.getElementById('gfinput-save-btn').disabled = false;
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+        .getGFInputRows(_selectedYear);
+    }
+
+    function _renderGFInputTable(rows) {
+      const tbody = document.getElementById('gfinput-tbody');
+      const tfoot = document.getElementById('gfinput-tfoot');
+      tbody.innerHTML = '';
+      if (!rows || !rows.length) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-dim)">ไม่มีข้อมูล — ยังไม่มีแผนงานในปีงบนี้</td></tr>';
+        tfoot.innerHTML = '';
+        return;
+      }
+      let totAlloc = 0, totPO = 0, totPaid = 0, totRemain = 0;
+
+      rows.forEach((r, idx) => {
+        const uid = `gf_${idx}`;
+        const remain = r.alloc - r.poNow - r.paidNow;
+        totAlloc  += r.alloc;
+        totPO     += r.poNow;
+        totPaid   += r.paidNow;
+        totRemain += remain;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="text-align:center;color:var(--text-dim)">${r.seq || (idx+1)}</td>
+          <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.plan}">${r.plan}</td>
+          <td style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim)">${r.code}</td>
+          <td class="num">${fmt(r.alloc)}</td>
+          <td class="num" style="color:var(--text-dim)">${fmt(r.poYest)}</td>
+          <td class="num" style="color:var(--text-dim)">${fmt(r.paidYest)}</td>
+          <td class="num">
+            <input type="number" id="${uid}_po" value="${r.poNow}" min="0" step="0.01"
+              data-row="${idx}" data-field="poNow"
+              oninput="_recalcGFRow(${idx})"
+              style="width:110px;padding:5px 8px;border:1px solid var(--amber);border-radius:6px;
+                     font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right">
+          </td>
+          <td class="num">
+            <input type="number" id="${uid}_paid" value="${r.paidNow}" min="0" step="0.01"
+              data-row="${idx}" data-field="paidNow"
+              oninput="_recalcGFRow(${idx})"
+              style="width:110px;padding:5px 8px;border:1px solid var(--teal);border-radius:6px;
+                     font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right">
+          </td>
+          <td class="num" id="${uid}_remain" style="font-weight:600;color:${remain >= 0 ? 'var(--green)' : 'var(--rose)'}">${fmt(remain)}</td>`;
+        tbody.appendChild(tr);
+      });
+
+      // tfoot summary row
+      tfoot.innerHTML = `
+        <tr style="background:var(--navy);color:#fff;font-weight:700">
+          <td colspan="3" style="padding:10px 12px">รวมทั้งหมด</td>
+          <td class="num" style="padding:10px 12px">${fmt(totAlloc)}</td>
+          <td></td><td></td>
+          <td class="num" id="gf-tot-po" style="padding:10px 12px">${fmt(totPO)}</td>
+          <td class="num" id="gf-tot-paid" style="padding:10px 12px">${fmt(totPaid)}</td>
+          <td class="num" id="gf-tot-remain" style="padding:10px 12px">${fmt(totRemain)}</td>
+        </tr>`;
+    }
+
+    function _recalcGFRow(idx) {
+      const uid = `gf_${idx}`;
+      const r = _gfRows[idx];
+      if (!r) return;
+      const po   = parseFloat(document.getElementById(`${uid}_po`).value) || 0;
+      const paid = parseFloat(document.getElementById(`${uid}_paid`).value) || 0;
+      const remain = r.alloc - po - paid;
+      const el = document.getElementById(`${uid}_remain`);
+      if (el) {
+        el.textContent = fmt(remain);
+        el.style.color = remain >= 0 ? 'var(--green)' : 'var(--rose)';
+      }
+      // อัป totals
+      let totPO = 0, totPaid = 0, totRemain = 0;
+      _gfRows.forEach((row, i) => {
+        const p  = parseFloat((document.getElementById(`gf_${i}_po`) || {value: row.poNow}).value) || 0;
+        const pd = parseFloat((document.getElementById(`gf_${i}_paid`) || {value: row.paidNow}).value) || 0;
+        totPO    += p;
+        totPaid  += pd;
+        totRemain+= row.alloc - p - pd;
+      });
+      const tpo = document.getElementById('gf-tot-po');
+      const tp  = document.getElementById('gf-tot-paid');
+      const tr  = document.getElementById('gf-tot-remain');
+      if (tpo) tpo.textContent = fmt(totPO);
+      if (tp)  tp.textContent  = fmt(totPaid);
+      if (tr)  tr.textContent  = fmt(totRemain);
+    }
+
+    function saveGFInputData() {
+      if (!_gfRows.length) { showError('กดโหลดข้อมูลก่อน'); return; }
+      // เก็บค่าที่ user แก้ไข
+      const updates = _gfRows.map((r, idx) => {
+        const poEl   = document.getElementById(`gf_${idx}_po`);
+        const paidEl = document.getElementById(`gf_${idx}_paid`);
+        const poVal   = poEl   ? parseFloat(poEl.value)   : NaN;
+        const paidVal = paidEl ? parseFloat(paidEl.value) : NaN;
+        return {
+          rowIndex:   r.rowIndex,
+          gfRowIndex: r.gfRowIndex || 0,
+          code:       r.code,
+          poNow:   isNaN(poVal)   ? (r.poNow   || 0) : poVal,
+          paidNow: isNaN(paidVal) ? (r.paidNow || 0) : paidVal,
+        };
+      });
+
+      Swal.fire({
+        title: 'ยืนยันบันทึกข้อมูล GFMIS?',
+        html: `จะบันทึก <b>${updates.length}</b> แผนงาน เข้า GF_Input Sheet<br>และอัปเดต DS2_MasterBudget ทันที`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#0d9488',
+        confirmButtonText: '✅ ยืนยัน',
+        cancelButtonText: 'ยกเลิก'
+      }).then(r => {
+        if (!r.isConfirmed) return;
+        showLoading('กำลังบันทึกข้อมูล...');
+        google.script.run
+          .withSuccessHandler(res => {
+            hideLoading();
+            if (!res || !res.success) { showError((res && res.message) || 'บันทึกไม่สำเร็จ'); return; }
+            Swal.fire({ icon: 'success', title: 'บันทึกสำเร็จ', html: res.message, timer: 3000, showConfirmButton: false });
+            loadDashboard(_selectedYear); // รีเฟรช Dashboard ทันที
+          })
+          .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+          .saveGFInput(updates);
+      });
+    }
+
+    // ════════════════════════════════════════════════
+    //  IMPORT
+    // ════════════════════════════════════════════════
+    function parsePaste() {
+
+      const raw = document.getElementById('paste-area').value.trim();
+      if (!raw) { document.getElementById('paste-msg').textContent = 'กรุณาวางข้อมูลก่อน'; return; }
+
+      const rows = raw.split('\n').map(line =>
+        line.split(/\t|  +/).map(v => v.trim())
+      ).filter(r => r.some(v => v));
+
+      document.getElementById('paste-msg').textContent = `พบ ${rows.length} แถว กำลังตรวจสอบ...`;
+      showLoading('กำลังตรวจสอบข้อมูล...');
+
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (!res.success) {
+            document.getElementById('paste-msg').textContent = '❌ ' + res.message;
+            return;
+          }
+          _stagingOk = true;
+          document.getElementById('paste-msg').textContent = `✅ พบ ${res.count} รายการ พร้อมยืนยัน`;
+          document.getElementById('confirm-btn').disabled = false;
+
+          // Preview
+          const pre = document.getElementById('preview-area');
+          pre.innerHTML = `<div class="import-preview">
+        <table>
+          <thead><tr><th>แผนงาน</th><th>รหัสงบ</th><th>งบสุทธิ</th><th>เบิกจ่าย</th><th>คงเหลือ</th></tr></thead>
+          <tbody>${res.preview.map(r => `<tr>
+            <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r[0]}</td>
+            <td style="font-family:monospace;font-size:11px">${r[1]}</td>
+            <td style="text-align:right">${fmt(r[2])}</td>
+            <td style="text-align:right">${fmt(r[5])}</td>
+            <td style="text-align:right">${fmt(r[7])}</td>
+          </tr>`).join('')}
+          </tbody>
+        </table>
+        ${res.count > 5 ? `<p style="padding:8px 10px;font-size:12px;color:var(--text-dim)">... และอีก ${res.count - 5} รายการ</p>` : ''}
+      </div>`;
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message); })
+        .stagingImport(rows);
+    }
+
+    function confirmImport() {
+      if (!_stagingOk) return;
+      // ใช้ _currentTransferDate (จากการสร้างรอบ) หรือ fallback ไปที่ inline date input
+      const importDate = _currentTransferDate || document.getElementById('transfer-date-inline')?.value || null;
+      Swal.fire({
+        title: 'ยืนยันนำเข้าข้อมูล?',
+        html: `ข้อมูลใน DS2_MasterBudget จะถูกอัปเดต${importDate ? `<br><small style="color:#64748b">วันที่รอบโอน: <b>${importDate}</b></small>` : ''}`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#0d9488',
+        confirmButtonText: 'ยืนยัน',
+        cancelButtonText: 'ยกเลิก',
+      }).then(res => {
+        if (!res.isConfirmed) return;
+        showLoading('กำลังนำเข้าข้อมูล...');
+        google.script.run
+          .withSuccessHandler(r => {
+            hideLoading();
+            _stagingOk = false;
+            document.getElementById('confirm-btn').disabled = true;
+            if (r.success) {
+              Swal.fire({ icon: 'success', title: 'นำเข้าสำเร็จ', html: r.message, timer: 3000 });
+              _currentTransferDate = null;
+              _currentTransferRound = null;
+              // reset panel
+              document.getElementById('transfer-import-panel').style.display = 'none';
+              document.getElementById('paste-area').value = '';
+              document.getElementById('paste-msg').textContent = '';
+              document.getElementById('import-round-info').textContent = 'กรุณากรอกวันที่แล้วกด "สร้างรอบใหม่" — หรือ Paste ข้อมูล GFMIS ด้านล่างได้เลยหากสร้างรอบแล้ว';
+              document.getElementById('import-round-info').style.color = 'var(--text-dim)';
+              loadDashboard();
+            } else {
+              showError(r.message);
+            }
+          })
+          .withFailureHandler(err => { hideLoading(); showError(err.message); })
+          .confirmImport(importDate, _selectedYear);
+      });
+    }
+
+    function saveInitial() {
+      const id = document.getElementById('init-id').value.trim();
+      const paid = +document.getElementById('init-paid').value;
+      const po = +document.getElementById('init-po').value;
+      if (!id) { Swal.fire('กรุณาใส่ Budget_ID', '', 'warning'); return; }
+      showLoading('กำลังบันทึก...');
+      google.script.run
+        .withSuccessHandler(r => {
+          hideLoading();
+          if (r.success) {
+            Swal.fire({ icon: 'success', title: 'บันทึกสำเร็จ', timer: 2000, showConfirmButton: false });
+            loadDashboard();
+          } else showError(r.message);
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message); })
+        .setInitialBalance(id, paid, po, null);
+    }
+
+    // ════════════════════════════════════════════════
+    //  LOGS
+    // ════════════════════════════════════════════════
+    function loadLogs() {
+      showLoading('โหลดประวัติ...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          const tbody = document.getElementById('log-tbody');
+          if (!tbody) return;
+          tbody.innerHTML = '';
+          const logs = (res && Array.isArray(res.logs)) ? res.logs : [];
+          if (!logs.length) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-dim)">ไม่มีข้อมูล</td></tr>';
+            return;
+          }
+          logs.forEach(r => {
+            const tr = document.createElement('tr');
+            const t1 = r[1] != null && r[1] !== '' ? String(r[1]) : '-';
+            tr.innerHTML = `
+          <td>${t1}</td>
+          <td>${r[2] || '-'}</td>
+          <td class="action">${r[3] || ''}</td>
+          <td>${r[4] || ''}</td>
+          <td class="action" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${r[5] || ''}</td>
+          <td style="text-align:right">${r[6] || 0}</td>
+          <td class="${r[7] === 'OK' ? 'log-ok' : 'log-err'}">${r[7] || ''}</td>`;
+            tbody.appendChild(tr);
+          });
+        })
+        .withFailureHandler(err => {
+          hideLoading();
+          const tbody = document.getElementById('log-tbody');
+          if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--rose)">โหลดไม่สำเร็จ: ' + (err && err.message ? err.message : String(err)) + '</td></tr>';
+        })
+        .getRecentLogs(30);
+    }
+
+    // ════════════════════════════════════════════════
+    //  UTILS
+    // ════════════════════════════════════════════════
+    function fmt(n) {
+      if (n == null || isNaN(n)) return '-';
+      return Number(n).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function alertBadge(alert, pct, target) {
+      if (alert === 'green') return `<span class="badge badge-green">✅ ปกติ ${pct}%</span>`;
+      if (alert === 'yellow') return `<span class="badge badge-yellow">🔸 ต้องติดตาม ${pct}%</span>`;
+      return `<span class="badge badge-red">⚠ ต้องเร่งรัด ${pct}%</span>`;
+    }
+
+    function showError(msg) {
+      Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: msg });
+    }
+
+
+    // ════ ADMIN LINE RENDER ════
+    function renderAdminTab(res) {
+      const s = res.summary;
+      const target = s.targetPct || 0;
+
+      // Pool cards
+      const pc = document.getElementById('pool-cards');
+      pc.innerHTML = '';
+      (res.poolSummary || []).forEach(p => {
+        const pct = p.pct;
+        const alert = pct >= target ? 'var(--green)' : pct >= target - 10 ? 'var(--amber)' : 'var(--rose)';
+        pc.insertAdjacentHTML('beforeend', `
+      <div class="chart-card" style="padding:18px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy)">${p.pool}</div>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:2px">เป้า ${p.targetPct}% ของงบดำเนินงาน</div>
+          </div>
+          <div style="font-size:22px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${alert}">${pct.toFixed(1)}%</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;height:6px;background:var(--border);border-radius:99px;overflow:hidden">
+            <div style="height:100%;width:${Math.min(pct, 100)}%;background:${alert};border-radius:99px;transition:width .8s"></div>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--text-dim)">
+          <span>จัดสรร ${fmt(p.alloc)}</span>
+          <span>เบิก ${fmt(p.paid)}</span>
+        </div>
+      </div>`);
+      });
+
+      // Admin table
+      const tbody = document.getElementById('admin-tbody');
+      tbody.innerHTML = '';
+      (res.adminSummary || []).forEach(r => {
+        const safeData = JSON.stringify({id:r.id,line:r.line,pool:r.pool,pct:r.pct,note:r.note||''}).replace(/"/g,'&quot;');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+      <td style="font-weight:600">${r.line}${r.note ? `<div style="font-size:10px;color:var(--text-dim);font-weight:400">${r.note}</div>` : ''}</td>
+      <td><span style="font-size:11px;padding:2px 8px;border-radius:4px;background:var(--bg);border:1px solid var(--border)">${r.pool}</span></td>
+      <td class="num">${fmt(r.allocated)}</td>
+      <td class="num">${fmt(r.paid)}</td>
+      <td>
+        <div class="mini-bar-wrap">
+          <div class="mini-bar-track">
+            <div class="mini-bar-fill" style="width:${Math.min(r.paidPct, 100)}%;background:${r.alert === 'green' ? '#0d9488' : r.alert === 'yellow' ? '#d97706' : '#e11d48'}"></div>
+          </div>
+          <span class="mini-bar-lbl">${r.paidPct}%</span>
+        </div>
+      </td>
+      <td>${alertBadge(r.alert, r.paidPct, target)}</td>
+      <td style="text-align:center">
+        ${r.isOverride ? '<span style="font-size:11px;color:var(--amber);font-weight:600">✏ Override</span>' : '<span style="font-size:11px;color:var(--text-dim)">อัตโนมัติ</span>'}
+      </td>
+      <td style="text-align:center">
+        <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
+          <button class="btn" style="padding:3px 8px;font-size:11px" onclick="showOverride('${r.id}','${r.line}',${r.allocated})" title="ตั้งยอดจัดสรรด้วยตนเอง">
+            ${r.isOverride ? '✏ Override' : 'Override'}
+          </button>
+          <button class="btn" style="padding:3px 8px;font-size:11px;color:var(--navy)" onclick="openAdminCrud(JSON.parse(this.dataset.d))" data-d="${safeData}" title="แก้ไขชื่อ/Pool/สัดส่วน">
+            แก้ไข
+          </button>
+          <button class="btn" style="padding:3px 8px;font-size:11px;color:#b91c1c;border-color:#fecaca;background:#fff5f5" onclick="confirmDeleteAdminLine('${r.id}','${r.line}')" title="ลบสายบริหาร">
+            ลบ
+          </button>
+        </div>
+      </td>`;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('admin-meta').textContent =
+        `${(res.adminSummary || []).length} สายบริหาร · เป้า ${target}% · อัปเดต ${s.lastUpdate}`;
+
+    }
+
+    // ════ TRANSFER ROUNDS RENDER ════
+    function renderTransferTab(res) {
+      const transferData = res.transferData || {};
+      const roundSummary = Array.isArray(transferData.roundSummary) ? transferData.roundSummary : [];
+      const roundNos = Array.isArray(transferData.roundNos) ? transferData.roundNos : [];
+      const rows = Array.isArray(transferData.rows) ? transferData.rows : (res.transferRounds || []);
+
+      const rc = document.getElementById('round-cards');
+      rc.innerHTML = '';
+      if (roundSummary.length) {
+        roundSummary.forEach((r, i) => {
+          const colors = ['#1a3a5c', '#2457a0', '#0d9488', '#7c3aed', '#64748b'];
+          const color = colors[i % colors.length];
+          rc.insertAdjacentHTML('beforeend', `
+        <div class="chart-card" style="padding:18px 20px">
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">รอบ ${r.roundNo} (${r.date || '-'})</div>
+          <div style="font-size:22px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${color}">${fmt(r.totalAmount || 0)}</div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:4px">บาท · ${r.count || 0} รายการ</div>
+          <div style="display:flex;gap:6px;margin-top:10px">
+            <button class="btn" style="padding:4px 10px;font-size:11px" onclick="editTransferRound('${r.roundId}','${r.date || ''}','${(r.description || '').replace(/'/g, '&#39;')}')">แก้ไข</button>
+            <button class="btn" style="padding:4px 10px;font-size:11px;color:#b91c1c;border-color:#fecaca;background:#fff5f5" onclick="removeTransferRound('${r.roundId}')">ลบรอบ</button>
+          </div>
+        </div>`);
+        });
+      } else {
+        rc.insertAdjacentHTML('beforeend', `
+      <div class="chart-card" style="padding:18px 20px;grid-column:1/-1">
+        <div style="font-size:12px;color:var(--text-dim)">ยังไม่มีข้อมูลรอบโอนของปีนี้</div>
+      </div>`);
+      }
+
+      const head = document.getElementById('transfer-head-row');
+      if (head) {
+        const dynRoundCols = roundNos.map(no => `<th style="text-align:right">รอบ ${no}</th>`).join('');
+        head.innerHTML = `
+        <th>Budget_ID</th>
+        <th>แผนงาน</th>
+        <th>Type</th>
+        ${dynRoundCols}
+        <th style="text-align:right">รวม</th>
+        <th style="text-align:right">เบิกจ่าย</th>
+        <th>%</th>`;
+      }
+
+      const tbody = document.getElementById('transfer-tbody');
+      tbody.innerHTML = '';
+      rows.forEach(r => {
+        const wtBg = r.wtype === 'A' ? '#e8f5e9' : r.wtype === 'B' ? '#fff3e0' : r.wtype === 'C' ? '#e3f2fd' : '#f5f5f5';
+        const roundCells = roundNos.map(no => {
+          const v = r.rounds && typeof r.rounds === 'object' ? Number(r.rounds[no] || 0) : 0;
+          return `<td class="num" style="color:${v > 0 ? 'var(--text)' : 'var(--text-dim)'}">${v > 0 ? fmt(v) : '—'}</td>`;
+        }).join('');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+      <td style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim)">${r.id}</td>
+      <td style="max-width:220px;white-space:normal;word-break:break-word;line-height:1.4">${r.plan}</td>
+      <td><span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${wtBg};font-weight:600">${r.wtype}</span></td>
+      ${roundCells}
+      <td class="num" style="font-weight:600">${fmt(r.total)}</td>
+      <td class="num">${fmt(r.paid)}</td>
+      <td>
+        <div class="mini-bar-wrap">
+          <div class="mini-bar-track">
+            <div class="mini-bar-fill" style="width:${Math.min(r.pct, 100)}%;background:${r.pct >= 100 ? '#0d9488' : '#2457a0'}"></div>
+          </div>
+          <span class="mini-bar-lbl">${r.pct}%</span>
+        </div>
+      </td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // ════ ACTIONS ════
+    let _currentTransferDate = null;
+    let _currentTransferRound = null;
+
+    // Open import panel in transfer tab (called from nav button or action menu)
+    function openImportPanel(navBtn) {
+      switchTabById('transfer');
+      setTimeout(() => {
+        const panel = document.getElementById('transfer-import-panel');
+        if (panel.style.display === 'none') panel.style.display = 'block';
+        const dateInput = document.getElementById('transfer-date-inline');
+        if (!dateInput.value) dateInput.value = new Date().toISOString().substring(0, 10);
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 50);
+    }
+
+    function toggleImportPanel() {
+      const panel = document.getElementById('transfer-import-panel');
+      const opening = panel.style.display === 'none';
+      panel.style.display = opening ? 'block' : 'none';
+      if (opening) {
+        const dateInput = document.getElementById('transfer-date-inline');
+        if (!dateInput.value) dateInput.value = new Date().toISOString().substring(0, 10);
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+
+    // สร้างรอบใหม่ แล้วเปิด CRUD modal ทันที
+    function createRoundAndStartImport() {
+      const d = document.getElementById('transfer-date-inline').value;
+      const desc = document.getElementById('transfer-desc-inline').value.trim();
+      if (!d) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาระบุวันที่โอน', timer: 2000, showConfirmButton: false });
+        return;
+      }
+      showLoading('กำลังสร้างรอบใหม่...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (!res.success) { showError(res.message || 'สร้างรอบใหม่ไม่สำเร็จ'); return; }
+          // อัปเดต info bar
+          const info = document.getElementById('import-round-info');
+          if (info) {
+            info.innerHTML = `✅ สร้างรอบที่ <b>${res.roundNo}</b> วันที่ <b>${d}</b> สำเร็จ`;
+            info.style.color = 'var(--green)';
+          }
+          // reload dashboard แล้วเปิด CRUD modal
+          loadDashboard(_selectedYear);
+          // เปิด CRUD modal ของรอบที่เพิ่งสร้าง
+          const roundId = res.roundId || `TR${_selectedYear}-${String(res.roundNo).padStart(3,'0')}`;
+          toggleImportPanel(); // ปิด panel
+          setTimeout(() => editTransferRound(roundId, d, desc), 400);
+        })
+        .withFailureHandler(err => { hideLoading(); showError('สร้างรอบใหม่ล้มเหลว: ' + (err.message || String(err))); })
+        .processTransferRound(d, _selectedYear, desc || `รอบโอนงบประมาณ ${d}`);
+    }
+
+    // compat stub — no longer needed since modal removed
+    function showTransferImport() { toggleImportPanel(); }
+
+    let _editingRoundId = null;
+
+    function editTransferRound(roundId, date, description) {
+      _editingRoundId = roundId;
+      const safeDesc = (description || '').replace(/&#39;/g, "'");
+      // populate meta fields
+      document.getElementById('crud-round-date').value = (date || '').substring(0, 10);
+      document.getElementById('crud-round-desc').value = safeDesc;
+      document.getElementById('crud-modal-title').textContent = `จัดการรอบโอนงบประมาณ · รอบ ${roundId}`;
+      document.getElementById('crud-modal-sub').textContent = `ปีงบ ${_selectedYear}`;
+      // clear add-item forms
+      ['crud-new-plan','crud-new-code','crud-new-amount','crud-pick-search','crud-pick-code','crud-pick-amount'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = '';
+      });
+      const pdEl = document.getElementById('crud-pick-selected-plan'); if (pdEl) pdEl.textContent = '';
+      // default mode = pick (เลือกจาก DS2)
+      setCrudMode('pick');
+      // open modal
+      document.getElementById('modal-round-crud').style.display = 'flex';
+      // load items
+      loadRoundItems();
+    }
+
+    function loadRoundItems() {
+      const tbody = document.getElementById('crud-items-tbody');
+      tbody.innerHTML = '<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--text-dim)">กำลังโหลด...</td></tr>';
+      document.getElementById('crud-items-total-row').style.display = 'none';
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.success) {
+            tbody.innerHTML = `<tr><td colspan="4" style="padding:16px;text-align:center;color:#b91c1c">${res ? res.message : 'โหลดล้มเหลว'}</td></tr>`;
+            return;
+          }
+          if (!res.items || res.items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--text-dim)">ยังไม่มีรายการงบประมาณในรอบนี้</td></tr>';
+            return;
+          }
+          let total = 0;
+          tbody.innerHTML = res.items.map((item, i) => {
+            const isUnchanged = item.unchanged === true;
+            total += isUnchanged ? 0 : (Number(item.amount) || 0);
+            const rowBg = isUnchanged ? '#fffbeb' : (i % 2 === 0 ? '' : 'background:#f8fafc');
+            const amtText = isUnchanged
+              ? `<span style="color:var(--text-dim);font-size:11px">ยอดคงเดิม</span>`
+              : Number(item.amount).toLocaleString('th-TH', {minimumFractionDigits:2,maximumFractionDigits:2});
+            const wt = item.wtype || 'A';
+            const safeCode = (item.budgetCode||'').replace(/'/g,"&#39;");
+            const wtDropdown = `
+              <select onchange="changeWalletType(this,'${safeCode}',this.value)"
+                data-prev="${wt}"
+                style="padding:3px 6px;border-radius:6px;border:1px solid var(--border);font-size:12px;font-weight:700;background:${_wtColors[wt]||'#f1f5f9'};cursor:pointer;font-family:'Sarabun',sans-serif;max-width:220px"
+                title="เปลี่ยนประเภทกระเป๋า">
+                ${Object.entries(_wtLabels).map(([v,lbl])=>`<option value="${v}"${v===wt?' selected':''}>${lbl}</option>`).join('')}
+              </select>`;
+            return `<tr style="border-bottom:1px solid var(--border);${rowBg}">
+              <td style="padding:7px 10px;font-size:12px;${isUnchanged?'color:var(--text-dim)':''}">${item.planName || '-'}</td>
+              <td style="padding:7px 10px;font-family:'IBM Plex Mono',monospace;font-size:12px;${isUnchanged?'color:var(--text-dim)':''}">${item.budgetCode || '-'}</td>
+              <td style="padding:7px 10px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px">${amtText}</td>
+              <td style="padding:6px 8px;text-align:center">${wtDropdown}</td>
+              <td style="padding:7px 10px;text-align:center">
+                <button onclick="deleteRoundItem('${safeCode}')"
+                  style="background:none;border:none;color:#b91c1c;cursor:pointer;font-size:14px;padding:2px 6px" title="ลบรายการนี้">&#x1F5D1;</button>
+              </td>
+            </tr>`;
+          }).join('');
+          const totalRow = document.getElementById('crud-items-total-row');
+          totalRow.style.display = '';
+          document.getElementById('crud-items-total').textContent = total.toLocaleString('th-TH', {minimumFractionDigits:2,maximumFractionDigits:2});
+        })
+        .withFailureHandler(err => {
+          document.getElementById('crud-items-tbody').innerHTML = `<tr><td colspan="5" style="padding:16px;text-align:center;color:#b91c1c">${err.message || String(err)}</td></tr>`;
+        })
+        .getTransferRoundItems(_editingRoundId, _selectedYear);
+    }
+
+    function saveRoundMeta() {
+      if (!_editingRoundId) return;
+      const date = document.getElementById('crud-round-date').value;
+      const desc = document.getElementById('crud-round-desc').value;
+      if (!date) { Swal.fire({ icon: 'warning', title: 'กรุณาระบุวันที่', timer: 1800, showConfirmButton: false }); return; }
+      showLoading('กำลังบันทึกข้อมูลรอบโอน...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (!res || !res.success) { showError((res && res.message) || 'บันทึกไม่สำเร็จ'); return; }
+          Swal.fire({ icon: 'success', title: 'บันทึกสำเร็จ', timer: 1500, showConfirmButton: false });
+          loadDashboard(_selectedYear);
+          updateCurrentRoundInfo();
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+        .updateTransferRoundMeta(_editingRoundId, date, desc, _selectedYear);
+    }
+
+    // ════ CRUD ITEM — mode switching ════
+    let _budgetList = []; // cache จาก DS2
+    let _pastePreviewItems = []; // parsed items จาก paste mode
+
+    function setCrudMode(mode) {
+      const modes = ['pick', 'manual', 'paste'];
+      modes.forEach(m => {
+        const panel = document.getElementById(`crud-mode-${m}`);
+        const btn   = document.getElementById(`crud-mode-${m}-btn`);
+        if (!panel || !btn) return;
+        const active = m === mode;
+        panel.style.display = active ? '' : 'none';
+        btn.style.background = active ? 'var(--green)' : 'transparent';
+        btn.style.color = active ? 'white' : 'var(--green)';
+      });
+      if (mode === 'pick') {
+        if (_budgetList.length === 0) loadBudgetList();
+        else renderBudgetPickList();
+        const f = document.getElementById('crud-pick-filter'); if (f) f.value = '';
+      }
+      if (mode === 'paste') {
+        // reset paste area เมื่อเปิดใหม่
+        const ta = document.getElementById('crud-paste-area');
+        if (ta && !ta.value) parsePasteForTransfer();
+      }
+    }
+
+    function loadBudgetList() {
+      const status = document.getElementById('crud-pick-status');
+      if (status) status.textContent = 'กำลังโหลด...';
+      const tbody = document.getElementById('crud-pick-tbody');
+      if (tbody) tbody.innerHTML = '<tr><td colspan="3" style="padding:16px;text-align:center;color:var(--text-dim)">กำลังโหลด...</td></tr>';
+      google.script.run
+        .withSuccessHandler(res => {
+          const hint = document.getElementById('crud-pick-empty-hint');
+          if (res && res.success) {
+            _budgetList = res.items || [];
+            if (status) status.textContent = `ปีงบ ${res.fyUsed} · ${_budgetList.length} รายการ`;
+            if (res.empty) {
+              if (tbody) tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text-dim)">—</td></tr>';
+              if (hint) hint.style.display = '';
+            } else {
+              if (hint) hint.style.display = 'none';
+              renderBudgetPickList();
+            }
+          } else {
+            if (status) status.textContent = 'โหลดล้มเหลว';
+            if (tbody) tbody.innerHTML = `<tr><td colspan="3" style="padding:16px;text-align:center;color:#b91c1c">${res && res.message || 'error'}</td></tr>`;
+          }
+        })
+        .withFailureHandler(err => {
+          if (status) status.textContent = 'โหลดล้มเหลว';
+          if (document.getElementById('crud-pick-tbody'))
+            document.getElementById('crud-pick-tbody').innerHTML = `<tr><td colspan="3" style="padding:16px;text-align:center;color:#b91c1c">${err.message || String(err)}</td></tr>`;
+        })
+        .getBudgetCodeList(_selectedYear);
+    }
+
+    function renderBudgetPickList() {
+      const q = (document.getElementById('crud-pick-filter')?.value || '').toLowerCase().trim();
+      const tbody = document.getElementById('crud-pick-tbody');
+      if (!tbody) return;
+      const list = q
+        ? _budgetList.filter(x => x.planName.toLowerCase().includes(q) || x.budgetCode.includes(q))
+        : _budgetList;
+      if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="3" style="padding:16px;text-align:center;color:var(--text-dim)">ไม่พบรายการ</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map((x, i) => `
+        <tr style="border-bottom:1px solid var(--border);${i%2===0?'':'background:#f8fafc'}">
+          <td style="padding:7px 10px;font-size:12px">${x.planName || '—'}</td>
+          <td style="padding:7px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim)">${x.budgetCode}</td>
+          <td style="padding:4px 8px;text-align:right">
+            <input type="number" data-code="${x.budgetCode}" data-plan="${(x.planName||'').replace(/"/g,'&quot;')}"
+              min="0" step="0.01" placeholder="—"
+              style="width:120px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;text-align:right;font-family:'IBM Plex Mono',monospace"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('tr').nextElementSibling?.querySelector('input[type=number]')?.focus();}">
+          </td>
+        </tr>`).join('');
+    }
+
+    function clearPickAmounts() {
+      document.querySelectorAll('#crud-pick-tbody input[type=number]').forEach(el => { el.value = ''; });
+    }
+
+    function addRoundItemsBulk() {
+      if (!_editingRoundId) return;
+      const inputs = document.querySelectorAll('#crud-pick-tbody input[type=number]');
+      const toAdd = [];
+      inputs.forEach(el => {
+        const amt = parseFloat(el.value) || 0;
+        if (amt > 0) toAdd.push({ budgetCode: el.dataset.code, planName: el.dataset.plan, amount: amt });
+      });
+      if (!toAdd.length) {
+        Swal.fire({ icon: 'warning', title: 'ยังไม่มีรายการ', text: 'กรอกจำนวนเงินในช่องที่ต้องการก่อน', timer: 2000, showConfirmButton: false });
+        return;
+      }
+      // add ทีละรายการต่อเนื่องกัน
+      showLoading(`กำลังเพิ่ม ${toAdd.length} รายการ...`);
+      let idx = 0;
+      const errors = [];
+      function next() {
+        if (idx >= toAdd.length) {
+          hideLoading();
+          if (errors.length) showError(`เพิ่มสำเร็จ ${toAdd.length - errors.length}/${toAdd.length} รายการ<br>ผิดพลาด: ${errors.join(', ')}`);
+          else Swal.fire({ icon: 'success', title: `เพิ่ม ${toAdd.length} รายการสำเร็จ`, timer: 1800, showConfirmButton: false });
+          clearPickAmounts();
+          loadRoundItems();
+          loadDashboard(_selectedYear);
+          updateCurrentRoundInfo();
+          return;
+        }
+        const item = toAdd[idx++];
+        google.script.run
+          .withSuccessHandler(res => {
+            if (!res || !res.success) errors.push(item.budgetCode);
+            next();
+          })
+          .withFailureHandler(() => { errors.push(item.budgetCode); next(); })
+          .addTransferRoundItem(_editingRoundId, item.planName, item.budgetCode, item.amount, _selectedYear);
+      }
+      next();
+    }
+
+    // compat stubs — ไม่ได้ใช้แล้วแต่เก็บไว้ไม่ให้ error
+    function filterBudgetPick() {}
+    function selectBudgetItem() {}
+    function addRoundItemPick() {}
+
+    // ════ PASTE MODE — parse + preview + bulk add ════
+    function parsePasteForTransfer() {
+      const raw = (document.getElementById('crud-paste-area')?.value || '').trim();
+      const preview = document.getElementById('crud-paste-preview');
+      const tbody   = document.getElementById('crud-paste-tbody');
+      const countEl = document.getElementById('crud-paste-count');
+      const errEl   = document.getElementById('crud-paste-error-msg');
+      const confirmBtn = document.getElementById('crud-paste-confirm-btn');
+      _pastePreviewItems = [];
+
+      if (!raw) { if (preview) preview.style.display = 'none'; return; }
+
+      const lines = raw.split(/\r?\n/).filter(l => l.trim());
+      let okCount = 0, errCount = 0;
+      const rows = lines.map((line, i) => {
+        // รองรับ tab และ | และ , เป็น delimiter
+        const cols = line.split(/\t|\s*\|\s*/).map(c => c.trim());
+        // ถ้า 2 คอลัมน์: code + amount (ไม่มีชื่อ)
+        // ถ้า 3 คอลัมน์: plan + code + amount
+        let planName = '', budgetCode = '', amount = 0;
+        if (cols.length >= 3) {
+          planName   = cols[0];
+          budgetCode = cols[1].replace(/\D/g, '');   // เหลือเฉพาะตัวเลข
+          amount     = parseFloat(cols[2].replace(/[^0-9.]/g, '')) || 0;
+        } else if (cols.length === 2) {
+          budgetCode = cols[0].replace(/\D/g, '');
+          amount     = parseFloat(cols[1].replace(/[^0-9.]/g, '')) || 0;
+        } else {
+          // 1 column — skip
+          return { line: i+1, planName: '-', budgetCode: line, amount: 0, ok: false, err: 'รูปแบบไม่ถูกต้อง' };
+        }
+        const codeOk   = /^\d{10,20}$/.test(budgetCode);
+        const amountOk = amount > 0;
+        const ok = codeOk && amountOk;
+        const err = !codeOk ? 'รหัสงบไม่ถูกต้อง' : (!amountOk ? 'จำนวนเงิน = 0' : '');
+        if (ok) { okCount++; _pastePreviewItems.push({ planName, budgetCode, amount }); }
+        else errCount++;
+        return { line: i+1, planName, budgetCode, amount, ok, err };
+      });
+
+      if (preview) preview.style.display = '';
+      if (countEl) countEl.textContent = `${okCount} รายการพร้อมเพิ่ม${errCount ? ` · ⚠ ${errCount} รายการมีข้อผิดพลาด` : ''}`;
+      if (errEl) errEl.textContent = '';
+      if (confirmBtn) confirmBtn.disabled = okCount === 0;
+      if (tbody) {
+        tbody.innerHTML = rows.map(r => `
+          <tr style="border-bottom:1px solid var(--border);${r.ok ? '' : 'background:#fff5f5'}">
+            <td style="padding:6px 8px;font-size:11px;color:var(--text-dim)">${r.line}</td>
+            <td style="padding:6px 8px;font-size:12px;${r.ok?'':'color:#b91c1c'}">${r.planName || '—'}</td>
+            <td style="padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;${r.ok?'color:var(--text-dim)':'color:#b91c1c'}">${r.budgetCode || r.line}</td>
+            <td style="padding:6px 8px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;${r.ok?'':'color:#b91c1c'}">
+              ${r.ok ? r.amount.toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
+            </td>
+            <td style="padding:6px 8px;text-align:center;font-size:11px">
+              ${r.ok ? '<span style="color:var(--green)">✓</span>' : `<span style="color:#b91c1c" title="${r.err}">✗ ${r.err}</span>`}
+            </td>
+          </tr>`).join('');
+      }
+    }
+
+    function addRoundItemsPaste() {
+      if (!_editingRoundId) return;
+      if (!_pastePreviewItems.length) {
+        Swal.fire({ icon: 'warning', title: 'ไม่มีรายการที่พร้อมเพิ่ม', text: 'กรุณาตรวจสอบข้อมูลก่อน', timer: 2000, showConfirmButton: false });
+        return;
+      }
+      const toAdd = [..._pastePreviewItems];
+      showLoading(`กำลังเพิ่ม ${toAdd.length} รายการ...`);
+      let idx = 0;
+      const errors = [];
+      function next() {
+        if (idx >= toAdd.length) {
+          hideLoading();
+          if (errors.length) {
+            showError(`เพิ่มสำเร็จ ${toAdd.length - errors.length}/${toAdd.length} รายการ<br>ผิดพลาด: ${errors.join(', ')}`);
+          } else {
+            Swal.fire({ icon: 'success', title: `✅ เพิ่ม ${toAdd.length} รายการสำเร็จ`, timer: 2000, showConfirmButton: false });
+          }
+          // reset
+          document.getElementById('crud-paste-area').value = '';
+          parsePasteForTransfer();
+          _pastePreviewItems = [];
+          // reload budget list cache
+          _budgetList = [];
+          loadRoundItems();
+          loadDashboard(_selectedYear);
+          updateCurrentRoundInfo();
+          return;
+        }
+        const item = toAdd[idx++];
+        google.script.run
+          .withSuccessHandler(res => {
+            if (!res || !res.success) errors.push(item.budgetCode);
+            next();
+          })
+          .withFailureHandler(() => { errors.push(item.budgetCode); next(); })
+          .addTransferRoundItem(_editingRoundId, item.planName, item.budgetCode, item.amount, _selectedYear);
+      }
+      next();
+    }
+    // ════════════════════════════════════════════════
+
+    function addRoundItem() {
+      if (!_editingRoundId) return;
+      const planName = document.getElementById('crud-new-plan').value.trim();
+      const budgetCode = document.getElementById('crud-new-code').value.replace(/\s/g,'').trim();
+      const amount = parseFloat(document.getElementById('crud-new-amount').value) || 0;
+      if (!budgetCode) { Swal.fire({ icon: 'warning', title: 'กรุณาระบุรหัสงบประมาณ', timer: 1800, showConfirmButton: false }); return; }
+      if (!/^\d{10,}$/.test(budgetCode)) { Swal.fire({ icon: 'warning', title: 'รหัสงบต้องเป็นตัวเลข 10+ หลัก', timer: 2000, showConfirmButton: false }); return; }
+      if (amount <= 0) { Swal.fire({ icon: 'warning', title: 'จำนวนเงินต้องมากกว่า 0', timer: 1800, showConfirmButton: false }); return; }
+      _doAddRoundItem(planName, budgetCode, amount, () => {
+        document.getElementById('crud-new-plan').value = '';
+        document.getElementById('crud-new-code').value = '';
+        document.getElementById('crud-new-amount').value = '';
+      });
+    }
+
+    function _doAddRoundItem(planName, budgetCode, amount, onSuccess) {
+      showLoading('กำลังเพิ่มรายการ...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (!res || !res.success) { showError((res && res.message) || 'เพิ่มรายการไม่สำเร็จ'); return; }
+          if (onSuccess) onSuccess();
+          loadRoundItems();
+          loadDashboard(_selectedYear);
+          updateCurrentRoundInfo();
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+        .addTransferRoundItem(_editingRoundId, planName, budgetCode, amount, _selectedYear);
+    }
+
+    function deleteRoundItem(budgetCode) {
+      if (!_editingRoundId) return;
+      Swal.fire({
+        title: 'ลบรายการนี้?',
+        html: `รหัสงบ: <b>${budgetCode}</b><br>ยอดจัดสรรใน DS2 จะถูก recalculate ใหม่`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'ลบ',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#b91c1c'
+      }).then(x => {
+        if (!x.isConfirmed) return;
+        showLoading('กำลังลบรายการ...');
+        google.script.run
+          .withSuccessHandler(res => {
+            hideLoading();
+            if (!res || !res.success) { showError((res && res.message) || 'ลบไม่สำเร็จ'); return; }
+            loadRoundItems();
+            loadDashboard(_selectedYear);
+            updateCurrentRoundInfo();
+          })
+          .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+          .deleteTransferRoundItem(_editingRoundId, budgetCode, _selectedYear);
+      });
+    }
+
+    // สีประจำ Wallet Type (A–F + X)
+    const _wtColors = { A:'#eff6ff', B:'#f5f3ff', C:'#f0fdfa', D:'#fffbeb', E:'#f8fafc', F:'#fef3c7', X:'#f1f5f9' };
+    const _wtLabels = {
+      A:'A — ขับเคลื่อนยุทธศาสตร์ (50%)',
+      B:'B — ขับเคลื่อนนโยบายเร่งด่วน (20%)',
+      C:'C — ค่าใช้จ่ายบริหาร/พื้นฐาน (30%)',
+      D:'D — ค่าใช้จ่ายตามสิทธิ์',
+      E:'E — งบบุคลากร',
+      F:'F — งบลงทุน',
+      X:'X — ไม่นับ/ยกเว้น',
+    };
+
+    function changeWalletType(sel, budgetCode, newWtype) {
+      const prevWtype = sel.dataset.prev || newWtype;
+      // optimistic UI: เปลี่ยนสีทันที + lock ระหว่าง save
+      sel.style.background = _wtColors[newWtype] || '#f1f5f9';
+      sel.disabled = true;
+      const statusEl = _getOrCreateWtStatus(sel);
+      statusEl.textContent = '⏳';
+
+      google.script.run
+        .withSuccessHandler(res => {
+          sel.disabled = false;
+          if (!res || !res.success) {
+            // revert
+            sel.value = prevWtype;
+            sel.style.background = _wtColors[prevWtype] || '#f1f5f9';
+            statusEl.textContent = '✗';
+            statusEl.style.color = '#b91c1c';
+            showError((res && res.message) || 'อัปเดตไม่สำเร็จ');
+            return;
+          }
+          sel.dataset.prev = newWtype;
+          statusEl.textContent = '✓';
+          statusEl.style.color = '#0d9488';
+          // ซ่อน ✓ หลัง 2 วิ
+          setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 2000);
+        })
+        .withFailureHandler(err => {
+          sel.disabled = false;
+          sel.value = prevWtype;
+          sel.style.background = _wtColors[prevWtype] || '#f1f5f9';
+          statusEl.textContent = '✗';
+          statusEl.style.color = '#b91c1c';
+          showError(err.message || String(err));
+        })
+        .updateBudgetWalletType(budgetCode, newWtype, _selectedYear);
+    }
+
+    function _getOrCreateWtStatus(sel) {
+      let el = sel.parentElement.querySelector('.wt-status');
+      if (!el) {
+        el = document.createElement('span');
+        el.className = 'wt-status';
+        el.style.cssText = 'font-size:13px;font-weight:700;margin-left:4px;vertical-align:middle';
+        sel.parentElement.appendChild(el);
+      }
+      return el;
+    }
+
+    function removeTransferRound(roundId) {
+      Swal.fire({
+        title: `ลบรอบโอน ${roundId}?`,
+        html: 'ระบบจะลบรายการใน DS7 ของรอบนี้ และ recalculated ยอดจัดสรรใน DS2 ตามรอบที่เหลือ',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'ลบ',
+        cancelButtonText: 'ยกเลิก'
+      }).then(x => {
+        if (!x.isConfirmed) return;
+        showLoading('กำลังลบรอบโอน...');
+        google.script.run
+          .withSuccessHandler(res => {
+            hideLoading();
+            if (!res || !res.success) { showError((res && res.message) || 'ลบไม่สำเร็จ'); return; }
+            Swal.fire({ icon: 'success', title: 'ลบรอบสำเร็จ', text: res.message || '', timer: 2000, showConfirmButton: false });
+            loadDashboard(_selectedYear);
+            updateCurrentRoundInfo();
+          })
+          .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+          .deleteTransferRound(roundId, _selectedYear);
+      });
+    }
+
+    // อัปเดตข้อมูลรอบปัจจุบัน (แสดงใน import panel)
+    function updateCurrentRoundInfo() {
+      const el = document.getElementById('import-round-info');
+      if (!el) return;
+      google.script.run
+        .withSuccessHandler(res => {
+          if (res.success && res.rounds && res.rounds.length > 0) {
+            const latest = res.rounds[0];
+            el.innerHTML = `รอบล่าสุด: ที่ <b>${latest.roundNo}</b> (${latest.date}) · ทั้งหมด ${res.count} รอบ`;
+            el.style.color = 'var(--text-dim)';
+          } else {
+            el.textContent = 'ยังไม่มีรอบโอน — กรุณากรอกวันที่แล้วกด "สร้างรอบใหม่"';
+          }
+        })
+        .withFailureHandler(() => { el.textContent = 'โหลดข้อมูลล้มเหลว'; })
+        .listTransferRounds(_selectedYear);
+    }
+
+    function showImportActivities() {
+      document.getElementById('modal-activities').style.display = 'flex';
+    }
+    function closeModal(id) {
+      document.getElementById(id).style.display = 'none';
+    }
+
+    function openMainMenu() {
+      const html = `
+    <div style="text-align:left">
+      <label style="font-size:12px;color:#64748b">เลือกคำสั่ง</label>
+      <select id="main-menu-action" class="swal2-select" style="width:100%">
+        <optgroup label="💰 Module 1: Wallet GFMIS">
+          <option value="openDailyUpdateForm">📝 อัพเดตยอด GFMIS (PO/เบิกจริง)</option>
+          <option value="showBudgetRoundForm">💰 บันทึกยอดโอนเงินจากกรม (เพิ่มงบ)</option>
+        </optgroup>
+        <optgroup label="📋 Module 2: จัดการแผนงาน">
+          <option value="showActivityPlanForm">➕ เพิ่ม/แก้ไข กิจกรรมในแผน</option>
+          <option value="migrateDocExportToPlan">📥 Import ข้อมูลจาก DOC_Export_ใหม่</option>
+          <option value="checkBudgetRatios">📊 ตรวจสอบสัดส่วนงบ (50/20/30)</option>
+        </optgroup>
+        <optgroup label="📝 Module 3: การกันเงิน/ขอเบิก">
+          <option value="showReservationForm">➕ บันทึกคำขอกันเงิน (แท็บ «กันเงินรายวัน»)</option>
+        </optgroup>
+        <optgroup label="ระบบ">
+          <option value="openWalletDashboard">📊 ดูรายงานสรุป Wallet</option>
+          <option value="openLogs">📋 ประวัติการใช้งาน</option>
+          <option value="initializeSystem">⚙️ รีเซต/สร้าง Sheet ที่จำเป็น</option>
+        </optgroup>
+      </select>
+    </div>`;
+      Swal.fire({
+        title: 'เมนูระบบงบประมาณ',
+        html,
+        showCancelButton: true,
+        confirmButtonText: 'ไปต่อ',
+        cancelButtonText: 'ยกเลิก',
+        preConfirm: () => document.getElementById('main-menu-action').value
+      }).then(res => {
+        if (!res.isConfirmed) return;
+        runMainMenuAction(res.value);
+      });
+    }
+
+    function runMainMenuAction(action) {
+      // local actions in web app
+      if (action === 'openDailyUpdateForm') {
+        openImportPanel();
+        return;
+      }
+      if (action === 'showBudgetRoundForm') {
+        openImportPanel();
+        return;
+      }
+      if (action === 'showReservationForm') {
+        switchTabById('activities');
+        openActivityForm();
+        return;
+      }
+      if (action === 'openWalletDashboard') {
+        switchTabById('dashboard');
+        return;
+      }
+      if (action === 'openLogs') {
+        switchTabById('logs');
+        return;
+      }
+      if (action === 'showActivityPlanForm') {
+        switchTabById('plan');
+        return;
+      }
+      if (action === 'migrateDocExportToPlan') {
+        switchTabById('plan');
+        setTimeout(() => openDocImportDialog(), 120);
+        return;
+      }
+
+      // server-side actions / roadmap
+      showLoading('กำลังประมวลผลคำสั่ง...');
+      google.script.run
+        .withSuccessHandler(r => {
+          hideLoading();
+          if (!r || !r.success) { showError((r && r.message) || 'คำสั่งไม่สำเร็จ'); return; }
+          if (action === 'initializeSystem') loadDashboard(_selectedYear);
+          Swal.fire({ icon: 'success', title: 'สำเร็จ', text: r.message || 'ดำเนินการเรียบร้อย', timer: 2500, showConfirmButton: false });
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+        .executeMainMenuAction(action, _selectedYear);
+    }
+
+    function _readFileAsText(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
+        reader.readAsText(file, 'utf-8');
+      });
+    }
+
+    async function openGanoenCSVImportDialog() {
+      const fy = _selectedYear || 2569;
+      const html = `
+        <div style="text-align:left">
+          <div style="font-size:12px;color:#64748b;margin-bottom:10px">
+            นำเข้าไฟล์ <b>.csv</b> จากชีท "รายละเอียด กันเงิน" ของ Google Sheets<br>
+            <span style="color:#94a3b8">ระบบจะข้าม 5 แถวแรก + แถว header โดยอัตโนมัติ</span>
+          </div>
+          <input id="ganoen-file" type="file" accept=".csv" class="swal2-file" style="margin-bottom:10px"/>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:11px;color:#475569;margin-bottom:8px">
+            <b>คอลัมน์ที่ระบบอ่าน:</b><br>
+            วันที่กันเงิน · กลุ่มงาน · โครงการ · กิจกรรม · งบประมาณ · เบิกจ่าย · รหัสงบ · สถานะ · ประเภทงบ · สายรองฯ
+          </div>
+          <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input id="ganoen-reset" type="checkbox">
+            ล้าง DS6 ของปีงบ <b>${fy}</b> ก่อนนำเข้า (แนะนำสำหรับ migration ครั้งแรก)
+          </label>
+        </div>`;
+
+      const result = await Swal.fire({
+        title: '<i class="fas fa-file-csv" style="color:#7c3aed;margin-right:6px"></i>นำเข้า CSV กันเงิน',
+        html,
+        showCancelButton: true,
+        confirmButtonColor: '#7c3aed',
+        confirmButtonText: '<i class="fas fa-file-import"></i> นำเข้าเลย',
+        cancelButtonText: 'ยกเลิก',
+        width: 520,
+        preConfirm: async () => {
+          const fileEl = document.getElementById('ganoen-file');
+          if (!fileEl || !fileEl.files[0]) {
+            Swal.showValidationMessage('กรุณาเลือกไฟล์ CSV ก่อน');
+            return false;
+          }
+          const clearFirst = document.getElementById('ganoen-reset').checked;
+          try {
+            const text = await _readFileAsText(fileEl.files[0]);
+            return { text, clearFirst };
+          } catch(e) {
+            Swal.showValidationMessage('อ่านไฟล์ไม่สำเร็จ: ' + e.message);
+            return false;
+          }
+        }
+      });
+
+      if (!result.isConfirmed || !result.value) return;
+
+      showLoading('กำลังนำเข้า CSV กันเงิน...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (!res || !res.success) { showError(res && res.message || 'เกิดข้อผิดพลาด'); return; }
+          Swal.fire({
+            icon: 'success',
+            title: 'นำเข้าสำเร็จ! ✅',
+            html: `<div style="font-size:14px">${res.message}</div>`,
+            timer: 4000,
+            showConfirmButton: false,
+          });
+          loadActivities(_actPage);
+          loadDashboard(_selectedYear);
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+        .importDS6FromGanoenCSV(result.value.text, _selectedYear, result.value.clearFirst);
+    }
+
+    async function openDocImportDialog() {
+      const html = `
+        <div style="text-align:left">
+          <div style="font-size:12px;color:#64748b;margin-bottom:8px">รองรับไฟล์ DOC Export ที่เป็น <code>.xls</code> (HTML table)</div>
+          <input id="doc-file" type="file" accept=".xls,.html,.htm" class="swal2-file" />
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+            <input id="doc-admin-line" class="swal2-input" placeholder="สายบริหาร (เว้นว่างได้)">
+            <input id="doc-group" class="swal2-input" placeholder="กลุ่มงาน (เว้นว่างได้)">
+          </div>
+          <div style="font-size:11px;color:#64748b;margin-top:4px">หมายเหตุ: ถ้าเว้นว่างไว้ สามารถไปแก้ในหน้าโครงการทีหลังได้</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+            <select id="doc-wtype" class="swal2-select">
+              <option value="A">A — ยุทธศาสตร์</option>
+              <option value="B">B — นโยบาย</option>
+              <option value="C">C — พื้นฐาน</option>
+              <option value="D">D — ตามสิทธิ์</option>
+            </select>
+            <label style="font-size:12px;display:flex;align-items:center;gap:6px;padding:0 2px">
+              <input id="doc-reset-year" type="checkbox"> ล้าง DS8/DS9 ของปีงบนี้ก่อน
+            </label>
+          </div>
+        </div>`;
+
+      const res = await Swal.fire({
+        title: `นำเข้า DOC Export (ปีงบ ${_selectedYear})`,
+        html,
+        width: 760,
+        showCancelButton: true,
+        confirmButtonText: 'นำเข้า',
+        cancelButtonText: 'ยกเลิก',
+        preConfirm: async () => {
+          const file = document.getElementById('doc-file').files[0];
+          if (!file) {
+            Swal.showValidationMessage('กรุณาเลือกไฟล์ .xls/.html ก่อน');
+            return false;
+          }
+          try {
+            const content = await _readFileAsText(file);
+            if (!content || content.length < 100) {
+              Swal.showValidationMessage('ไฟล์ว่าง หรืออ่านไม่สำเร็จ');
+              return false;
+            }
+            return {
+              content,
+              options: {
+                fiscalYear: _selectedYear,
+                adminLine: document.getElementById('doc-admin-line').value || '',
+                group: document.getElementById('doc-group').value || '',
+                wtype: document.getElementById('doc-wtype').value || 'A',
+                resetYear: document.getElementById('doc-reset-year').checked,
+              }
+            };
+          } catch (e) {
+            Swal.showValidationMessage(e.message || String(e));
+            return false;
+          }
+        }
+      });
+
+      if (!res.isConfirmed || !res.value) return;
+      showLoading('กำลังนำเข้า DOC Export...');
+      google.script.run
+        .withSuccessHandler(r => {
+          hideLoading();
+          if (!r || !r.success) { showError((r && r.message) || 'นำเข้าไม่สำเร็จ'); return; }
+          Swal.fire({
+            icon: 'success',
+            title: 'นำเข้าสำเร็จ',
+            text: `${r.message || ''} (อ่านได้ ${r.parsedProjects || 0} โครงการ)`
+          });
+          loadPlanData();
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+        .importDocExportToPlan(res.value.content, res.value.options);
+    }
+
+    function submitActivities() {
+      const raw = document.getElementById('act-paste').value.trim();
+      if (!raw) return;
+      const rows = raw.split('\n').map(l => l.split(/\t/).map(v => v.trim())).filter(r => r.some(v => v));
+      document.getElementById('act-msg').textContent = `พบ ${rows.length} แถว กำลังนำเข้า...`;
+      showLoading('กำลังนำเข้ากิจกรรม...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          document.getElementById('act-msg').textContent = res.success ? `✅ ${res.message}` : `❌ ${res.message}`;
+          if (res.success) { closeModal('modal-activities'); loadDashboard(); loadActivities(); }
+        })
+        .withFailureHandler(err => { hideLoading(); document.getElementById('act-msg').textContent = 'Error: ' + err.message; })
+        .importActivities(rows, null, _selectedYear);
+    }
+
+    /** โหลดรายการจากชีท source (ครั้งเดียว) แล้วเติม dropdown กลุ่มงาน/สถานะ/ประเภทงบ/รหัสงบ — โครงการขึ้นกับกลุ่มงาน */
+    function applyActivitySourceDropdowns() {
+      const res = _sourceRef;
+      if (!res || !res.success) return;
+      fillSelectOptions('act-group', res.groups || [], 'เลือกกลุ่มงาน');
+      fillSelectOptions('act-status', res.actStatuses || [], 'เลือกสถานะ');
+      fillSelectOptions('act-btype', res.budgetTypes || [], 'เลือกประเภทงบ');
+      fillSelectOptions('act-budget-code', res.budgetCodes || [], 'เลือกรหัสงบประมาณ');
+      fillSelectOptions('act-project', [], 'เลือกกลุ่มงานก่อน');
+    }
+
+    /**
+     * @param {function=} onReady เรียกหลังมี _sourceRef (และหลัง apply ครั้งแรก)
+     */
+    function initActivitySourceOptions(onReady) {
+      const done = () => { if (typeof onReady === 'function') onReady(); };
+      if (_sourceRef) {
+        done();
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.success) {
+            showError('โหลดข้อมูลชีท source ไม่สำเร็จ (dropdown กลุ่มงาน/โครงการ)');
+            return;
+          }
+          _sourceRef = res;
+          applyActivitySourceDropdowns();
+          done();
+        })
+        .withFailureHandler(err => {
+          showError('โหลดข้อมูลชีท source ล้มเหลว: ' + (err && err.message ? err.message : String(err)));
+        })
+        .getSourceData();
+    }
+
+    /** กรองรายการโครงการตามกลุ่มงานที่เลือก (dependent dropdown) */
+    function refreshActivityProjectOptions() {
+      const group = (document.getElementById('act-group') && document.getElementById('act-group').value || '').trim();
+      const rows = (_sourceRef && _sourceRef.sourceRows) ? _sourceRef.sourceRows : [];
+      let projects = [];
+      if (group) {
+        const set = new Set();
+        rows.forEach(r => {
+          const g = (r.group || '').trim();
+          const p = (r.project || '').trim();
+          if (g === group && p) set.add(p);
+        });
+        projects = Array.from(set).sort((a, b) => a.localeCompare(b, 'th'));
+      }
+      const ph = group ? 'เลือกโครงการ' : 'เลือกกลุ่มงานก่อน';
+      fillSelectOptions('act-project', projects, ph);
+    }
+
+    function onActivityGroupChange() {
+      refreshActivityProjectOptions();
+    }
+
+    function onActivityProjectChange() {
+      if (!_sourceRef || !_sourceRef.sourceRows) return;
+      const proj = (document.getElementById('act-project').value || '').trim();
+      if (!proj) return;
+      const g = (document.getElementById('act-group').value || '').trim();
+      const list = _sourceRef.sourceRows || [];
+      const row = list.find(x => (x.project || '').trim() === proj && (!g || (x.group || '').trim() === g))
+        || list.find(x => (x.project || '').trim() === proj);
+      if (!row) return;
+      if (row.actStatus) ensureSelectValue('act-status', row.actStatus);
+      if (row.budgetType) ensureSelectValue('act-btype', row.budgetType);
+      if (row.budgetCode) ensureSelectValue('act-budget-code', row.budgetCode);
+    }
+
+    function fillSelectOptions(id, options, placeholder) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const seen = new Set();
+      el.innerHTML = `<option value="">${placeholder || 'เลือก'}</option>`;
+      (options || []).forEach(opt => {
+        const isObj = opt && typeof opt === 'object';
+        const val = isObj ? String(opt.value ?? '').trim() : String(opt).trim();
+        const lbl = isObj ? String(opt.label ?? opt.value ?? '').trim() : val;
+        if (!val || seen.has(val)) return;
+        seen.add(val);
+        el.insertAdjacentHTML('beforeend', `<option value="${val}">${lbl}</option>`);
+      });
+    }
+
+    function ensureSelectValue(id, value) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const v = String(value || '');
+      if (!v) { el.value = ''; return; }
+      if (![...el.options].some(o => o.value === v)) {
+        el.insertAdjacentHTML('beforeend', `<option value="${v}">${v}</option>`);
+      }
+      el.value = v;
+    }
+
+    function loadActivities(page = _actPage) {
+      _actPageSize = parseInt(document.getElementById('act-page-size')?.value || _actPageSize || 20, 10);
+      _actPage = Math.max(1, page);
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.success) return;
+          _activities = res.rows || [];
+          _actPage = res.page || 1;
+          _actTotalPages = res.totalPages || 1;
+          const total = res.total || 0;
+          renderActivities(_activities, total);
+          const meta = document.getElementById('act-meta');
+          const base = `ปีงบ ${_selectedYear} · ทั้งหมด ${total} รายการ`;
+          if (meta) {
+            if (total === 0) {
+              meta.innerHTML = base + '<br><span style="font-size:11px;color:#64748b;display:block;margin-top:6px;line-height:1.45">ถ้ามีรายการทดสอบที่วันที่ <strong>2026-03-19</strong> แต่เลือกปีงบ <strong>2568</strong> จะไม่ขึ้น — วันนั้นอยู่ในปีงบไทย <strong>2569</strong> (ต.ค.–ก.ย.) · ลองเปลี่ยน dropdown ปีงบด้านบนเป็น 2569 หรือเพิ่มรายการใหม่โดยใส่วันที่ในช่วง ต.ค. 2567 – ก.ย. 2568 (ค.ศ. ประมาณ ต.ค. 2024 – ก.ย. 2025)</span>';
+            } else {
+              meta.textContent = base;
+            }
+          }
+          document.getElementById('act-page-info').textContent =
+            `หน้า ${_actPage}/${_actTotalPages}`;
+        })
+        .withFailureHandler(() => { })
+        .listActivities(_selectedYear, _actQuery, _actPage, _actPageSize, false);
+    }
+
+    function renderActivities(rows, totalForYear) {
+      const tbody = document.getElementById('act-tbody');
+      tbody.innerHTML = '';
+      if (!rows || !rows.length) {
+        const t = totalForYear === 0 || totalForYear === undefined;
+        const extra = t
+          ? '<br><span style="font-size:12px;display:block;margin-top:10px;max-width:720px;margin-left:auto;margin-right:auto;line-height:1.5">รายการถูกกรองจาก <strong>วันที่</strong> ในแต่ละแถวตามปีงบไทย (เดือน ต.ค. ถึง ก.ย.) ไม่ใช่ตามปี ค.ศ. ของวันที่อย่างเดียว</span>'
+          : '';
+        tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:22px;color:var(--text-dim)">ยังไม่มีรายการที่วันที่ตรงกับปีงบนี้' + extra + '</td></tr>';
+        return;
+      }
+      const STATUS_STYLES = {
+        'เบิกจ่ายแล้ว': 'background:#d1fae5;color:#065f46;border-color:#6ee7b7',
+        'กันเงิน':       'background:#ede9fe;color:#5b21b6;border-color:#c4b5fd',
+        'PO แล้ว':       'background:#dbeafe;color:#1e40af;border-color:#93c5fd',
+        'รอดำเนินการ':   'background:#fef9c3;color:#854d0e;border-color:#fde047',
+        'ยกเลิก':        'background:#fee2e2;color:#991b1b;border-color:#fca5a5',
+      };
+      const STATUS_LIST = ['เบิกจ่ายแล้ว','กันเงิน','PO แล้ว','รอดำเนินการ','ยกเลิก'];
+
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        const cur = r.status || '';
+        const sStyle = STATUS_STYLES[cur] || 'background:#f1f5f9;color:#475569;border-color:#cbd5e1';
+        const opts = STATUS_LIST.map(s =>
+          `<option value="${s}"${s === cur ? ' selected' : ''}>${s}</option>`
+        ).join('');
+        tr.innerHTML = `
+      <td>${r.date || '-'}</td>
+      <td>${r.group || '-'}</td>
+      <td>${r.adminLine || '-'}</td>
+      <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.person || ''}">${r.person || '<span style="color:var(--text-dim)">—</span>'}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.project || ''}">${r.project || ''}</td>
+      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.activity || ''}">${r.activity || ''}</td>
+      <td style="font-size:11px;color:var(--text-dim)">${r.budgetCode || ''}</td>
+      <td class="num">${fmt(r.budget)}</td>
+      <td class="num">${fmt(r.paid)}</td>
+      <td style="padding:4px 6px">
+        <select data-act-id="${r.id}"
+          onchange="quickUpdateStatus(this, '${r.id}')"
+          style="font-size:11px;font-weight:600;padding:3px 6px;border-radius:6px;border:1px solid;cursor:pointer;${sStyle}">
+          ${opts}
+        </select>
+      </td>
+      <td>${r.btype || ''}</td>
+      <td style="text-align:center;white-space:nowrap">
+        <button class="btn" style="padding:4px 10px;font-size:11px" onclick="openDS6ActivityForm('${r.id}')">แก้ไข</button>
+        <button class="btn" style="padding:4px 10px;font-size:11px;color:var(--rose)" onclick="removeActivity('${r.id}')">ลบ</button>
+      </td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // ── migrate WTYPE ──────────────────────────────────────────────────────
+    function runMigrateWtype() {
+      Swal.fire({
+        title: 'กำหนด Wallet Type?',
+        html: `เติม <b>A/B/C/D/E/F/H</b> ให้ทุกแถวใน DS6 ที่ยังว่าง<br>
+               โดยอ่านจากช่อง <b>ประเภทงบ (BTYPE)</b> อัตโนมัติ`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#7c3aed',
+        confirmButtonText: '<i class="fas fa-tags"></i> กำหนดเลย',
+        cancelButtonText: 'ยกเลิก',
+      }).then(r => {
+        if (!r.isConfirmed) return;
+        showLoading('กำลังกำหนด Wallet Type...');
+        google.script.run
+          .withSuccessHandler(res => {
+            hideLoading();
+            if (!res || !res.success) { showError(res && res.message || 'เกิดข้อผิดพลาด'); return; }
+            Swal.fire({ icon:'success', title:'สำเร็จ', text: res.message, timer:2500, showConfirmButton:false });
+            loadDashboard(_selectedYear);
+          })
+          .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+          .migrateDS6WtypeFromBtype(_selectedYear);
+      });
+    }
+
+    // ════════════════════════════════════════════════
+    //  สมุดคุมการเบิกจ่าย — Budget Ledger Modal
+    // ════════════════════════════════════════════════
+    let _ledgerData = null;
+
+    function openBudgetLedger(budgetCode) {
+      const modal = document.getElementById('modal-budget-ledger');
+      if (!modal) return;
+      // reset
+      document.getElementById('ledger-title').textContent = budgetCode;
+      document.getElementById('ledger-code').textContent  = 'กำลังโหลด...';
+      document.getElementById('ledger-summary').innerHTML = '';
+      document.getElementById('ledger-tbody').innerHTML =
+        '<tr><td colspan="12" style="padding:24px;text-align:center;color:var(--text-dim)"><i class="fas fa-spinner fa-spin"></i> กำลังโหลด...</td></tr>';
+      modal.style.display = 'flex';
+
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.success) {
+            document.getElementById('ledger-tbody').innerHTML =
+              `<tr><td colspan="12" style="padding:24px;text-align:center;color:var(--rose)">${res && res.message || 'โหลดข้อมูลไม่สำเร็จ'}</td></tr>`;
+            return;
+          }
+          _ledgerData = res;
+          renderBudgetLedger(res);
+        })
+        .withFailureHandler(err => {
+          document.getElementById('ledger-tbody').innerHTML =
+            `<tr><td colspan="12" style="padding:24px;text-align:center;color:var(--rose)">${err.message || String(err)}</td></tr>`;
+        })
+        .getBudgetLedger(budgetCode, _selectedYear);
+    }
+
+    function renderBudgetLedger(d) {
+      // Header
+      document.getElementById('ledger-title').textContent =
+        d.budgetName || d.budgetCode || '—';
+      document.getElementById('ledger-code').textContent =
+        `รหัสงบประมาณ: ${d.budgetCode}  ·  ปีงบ ${d.fiscalYear}`;
+
+      // Summary cards
+      const sumEl = document.getElementById('ledger-summary');
+      const SCARDS = [
+        { label:'งบโอนจากกรม (DS2)', val: fmt(d.alloc),        color:'var(--navy)', bg:'#eff6ff' },
+        { label:'กันเงินรวม (DS6)',   val: fmt(d.totalBudget),  color:'#7c3aed',     bg:'#f5f3ff' },
+        { label:'เบิกจ่ายรวม',       val: fmt(d.totalPaid),    color:'#0d9488',     bg:'#f0fdfa' },
+        { label:'คงเหลือ',           val: fmt(d.remaining),    color: d.remaining < 0 ? 'var(--rose)' : 'var(--text)', bg: d.remaining < 0 ? '#fff5f5' : '#f8fafc' },
+      ];
+      sumEl.innerHTML = SCARDS.map(c => `
+        <div style="padding:14px 18px;background:${c.bg};border-right:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--text-dim);font-weight:500;margin-bottom:4px">${c.label}</div>
+          <div style="font-size:18px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${c.color}">${c.val}</div>
+        </div>`).join('');
+
+      // Table rows
+      const tbody = document.getElementById('ledger-tbody');
+      if (!d.items || !d.items.length) {
+        tbody.innerHTML = '<tr><td colspan="12" style="padding:24px;text-align:center;color:var(--text-dim)">ยังไม่มีรายการกันเงิน DS6 สำหรับรหัสนี้</td></tr>';
+        document.getElementById('ledger-foot').textContent = '0 รายการ';
+        return;
+      }
+
+      const balColor = v => v < 0 ? 'color:var(--rose);font-weight:700' : '';
+      tbody.innerHTML = d.items.map(it => `
+        <tr style="border-bottom:1px solid var(--border);transition:background .15s" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
+          <td style="padding:7px 10px;text-align:center;color:var(--text-dim);font-size:11px">${it.no}</td>
+          <td style="padding:7px 10px;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${it.project}">${it.project || '<span style="color:var(--text-dim)">—</span>'}</td>
+          <td style="padding:7px 10px;font-size:12px;max-width:220px" title="${it.activity}">${it.activity}</td>
+          <td style="padding:7px 10px;font-size:11px;color:var(--text-dim);white-space:nowrap">${it.duration || '—'}</td>
+          <td style="padding:7px 10px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600">${it.budget > 0 ? fmt(it.budget) : '—'}</td>
+          <td style="padding:7px 8px;text-align:center;font-size:11px;color:#0d9488;background:#f0fdfa;white-space:nowrap">${it.date || '—'}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#0d9488;background:#f0fdfa">${it.budget > 0 ? fmt(it.budget) : '—'}</td>
+          <td style="padding:7px 8px;text-align:center;font-size:11px;color:#2457a0;background:#eff6ff;white-space:nowrap">${it.paid > 0 ? it.date : '—'}</td>
+          <td style="padding:7px 8px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#2457a0;background:#eff6ff">${it.paid > 0 ? fmt(it.paid) : '—'}</td>
+          <td style="padding:7px 10px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;${balColor(it.balance)}">${fmt(it.balance)}</td>
+          <td style="padding:7px 10px;font-size:11px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${it.person}">${it.person || '—'}</td>
+          <td style="padding:7px 10px;font-size:11px;color:var(--text-dim)">${it.group || '—'}</td>
+        </tr>`).join('');
+
+      document.getElementById('ledger-foot').textContent =
+        `${d.items.length} รายการ · กันรวม ${fmt(d.totalBudget)} · เบิกรวม ${fmt(d.totalPaid)} · คงเหลือ ${fmt(d.remaining)}`;
+    }
+
+    function exportLedgerCSV() {
+      if (!_ledgerData) return;
+      const d = _ledgerData;
+      const rows = [
+        [`ทะเบียนคุมการเบิกจ่าย เงินงบประมาณ ปี ${d.fiscalYear}`],
+        [d.budgetName || ''],
+        [`รหัสงบประมาณ: ${d.budgetCode}`],
+        [],
+        ['#','โครงการ','กิจกรรมดำเนินงาน','ระยะเวลา','งบประมาณ (บาท)',
+         'กันเงิน-วันที่','กันเงิน-จำนวน','เบิก-วันที่','เบิก-จำนวน',
+         'คงเหลือ','ผู้รับผิดชอบ','กลุ่มงาน'],
+        ['','รวม','',`ปีงบ ${d.fiscalYear}`,d.alloc,'ปีงบ',d.totalBudget,'ปีงบ',d.totalPaid,'','',''],
+      ];
+      (d.items || []).forEach(it => {
+        rows.push([
+          it.no, it.project, it.activity, it.duration,
+          it.budget, it.date, it.budget,
+          it.paid > 0 ? it.date : '', it.paid > 0 ? it.paid : '',
+          it.balance, it.person, it.group,
+        ]);
+      });
+      const csv = rows.map(r =>
+        r.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')
+      ).join('\n');
+      const bom  = '\uFEFF';
+      const blob = new Blob([bom + csv], { type:'text/csv;charset=utf-8;' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `สมุดคุม_${d.budgetCode}_${d.fiscalYear}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // ── inline status dropdown ──────────────────────────────────────────────
+    const _STATUS_STYLES = {
+      'เบิกจ่ายแล้ว': 'background:#d1fae5;color:#065f46;border-color:#6ee7b7',
+      'กันเงิน':       'background:#ede9fe;color:#5b21b6;border-color:#c4b5fd',
+      'PO แล้ว':       'background:#dbeafe;color:#1e40af;border-color:#93c5fd',
+      'รอดำเนินการ':   'background:#fef9c3;color:#854d0e;border-color:#fde047',
+      'ยกเลิก':        'background:#fee2e2;color:#991b1b;border-color:#fca5a5',
+    };
+    function quickUpdateStatus(selectEl, activityId) {
+      const newStatus = selectEl.value;
+      // อัปเดต style ทันทีก่อน round-trip
+      const style = _STATUS_STYLES[newStatus] || 'background:#f1f5f9;color:#475569;border-color:#cbd5e1';
+      selectEl.setAttribute('style',
+        `font-size:11px;font-weight:600;padding:3px 6px;border-radius:6px;border:1px solid;cursor:pointer;${style}`);
+      selectEl.disabled = true;
+
+      google.script.run
+        .withSuccessHandler(res => {
+          selectEl.disabled = false;
+          if (!res || !res.success) {
+            showError(res && res.message || 'อัปเดตสถานะไม่สำเร็จ');
+            // คืนค่าเดิม
+            loadActivities(_actPage);
+            return;
+          }
+          // อัปเดต local cache เพื่อไม่ต้อง reload ทั้งหน้า
+          const idx = _activities.findIndex(a => a.id === activityId);
+          if (idx >= 0) _activities[idx].status = newStatus;
+          // ถ้าสถานะที่กระทบยอดเงิน ให้ reload dashboard ด้วย
+          if (newStatus === 'เบิกจ่ายแล้ว' || newStatus === 'ยกเลิก') {
+            loadDashboard(_selectedYear);
+          }
+        })
+        .withFailureHandler(err => {
+          selectEl.disabled = false;
+          showError(err.message || String(err));
+          loadActivities(_actPage);
+        })
+        .quickUpdateActivityStatus(activityId, newStatus, _selectedYear);
+    }
+
+    function filterActivities() {
+      _actQuery = (document.getElementById('act-search').value || '').trim();
+      loadActivities(1);
+    }
+
+    function changeActivityPageSize() {
+      _actPageSize = parseInt(document.getElementById('act-page-size').value || 20, 10);
+      loadActivities(1);
+    }
+
+    function goActivityPage(delta) {
+      const next = _actPage + delta;
+      if (next < 1 || next > _actTotalPages) return;
+      loadActivities(next);
+    }
+
+    function openDS6ActivityForm(activityId) {
+      initActivitySourceOptions(() => {
+        _activityEditId = activityId || null;
+        const isEdit = !!_activityEditId;
+        let d = isEdit ? (_activities.find(x => x.id === _activityEditId) || {}) : {};
+        if (isEdit && (d.project || '').trim() && !(d.group || '').trim() && _sourceRef && _sourceRef.sourceRows) {
+          const hit = (_sourceRef.sourceRows || []).find(x => (x.project || '').trim() === (d.project || '').trim());
+          if (hit && hit.group) d = { ...d, group: hit.group };
+        }
+        document.getElementById('act-form-title').textContent = isEdit ? 'แก้ไขรายการกันเงิน' : 'เพิ่มรายการกันเงิน';
+        // วันที่: แก้ไข = ใช้ค่าเดิม / เพิ่มใหม่ = วันนี้
+        const todayStr = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD
+        document.getElementById('act-date').value = d.date || todayStr;
+        ensureSelectValue('act-group', d.group || '');
+        refreshActivityProjectOptions();
+        ensureSelectValue('act-project', d.project || '');
+        document.getElementById('act-name').value = d.activity || '';
+        document.getElementById('act-budget').value = d.budget != null ? d.budget : '';
+        document.getElementById('act-paid').value = d.paid != null ? d.paid : 0;
+        ensureSelectValue('act-status', d.status || 'กันเงิน'); // default = กันเงิน
+        ensureSelectValue('act-btype', d.btype || '');
+        ensureSelectValue('act-budget-code', d.budgetCode || '');
+        document.getElementById('act-person').value   = d.person   || '';
+        document.getElementById('act-duration').value = d.duration || '';
+        document.getElementById('modal-ds6-activity-form').style.display = 'flex';
+      });
+    }
+
+    function saveDS6ActivityForm() {
+      const budget = parseFloat(document.getElementById('act-budget').value || 0);
+      const paid = parseFloat(document.getElementById('act-paid').value || 0);
+      const payload = {
+        date: document.getElementById('act-date').value,
+        group: document.getElementById('act-group').value,
+        project: document.getElementById('act-project').value,
+        activity: document.getElementById('act-name').value,
+        budget,
+        paid,
+        status: document.getElementById('act-status').value,
+        btype: document.getElementById('act-btype').value,
+        budgetCode: document.getElementById('act-budget-code').value,
+        person:   (document.getElementById('act-person').value   || '').trim(),
+        duration: (document.getElementById('act-duration').value || '').trim(),
+      };
+      if (!payload.activity) { showError('กรุณาระบุชื่อกิจกรรม'); return; }
+      if (isNaN(budget)) { showError('กรุณาระบุงบประมาณ'); return; }
+      if (isNaN(paid))   { showError('กรุณาระบุยอดเบิกจ่าย'); return; }
+      showLoading('กำลังบันทึกรายการกันเงิน...');
+      const runner = google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (!res || !res.success) { showError((res && res.message) || 'บันทึกไม่สำเร็จ'); return; }
+          closeModal('modal-ds6-activity-form');
+          loadActivities();
+          loadDashboard(_selectedYear);
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); });
+      if (_activityEditId) runner.updateActivity(_activityEditId, payload, _selectedYear);
+      else runner.createActivity(payload, _selectedYear);
+    }
+
+    function removeActivity(activityId) {
+      Swal.fire({
+        title: 'ลบรายการกันเงิน?',
+        text: 'ระบบจะเก็บประวัติการลบ (soft-delete)',
+        input: 'text',
+        inputPlaceholder: 'เหตุผลการลบ (ไม่บังคับ)',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'ลบ',
+        cancelButtonText: 'ยกเลิก'
+      }).then(x => {
+        if (!x.isConfirmed) return;
+        const reason = x.value || '';
+        showLoading('กำลังลบรายการ...');
+        google.script.run
+          .withSuccessHandler(res => {
+            hideLoading();
+            if (!res || !res.success) { showError((res && res.message) || 'ลบไม่สำเร็จ'); return; }
+            loadActivities(_actPage);
+            loadDashboard(_selectedYear);
+          })
+          .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+          .deleteActivity(activityId, _selectedYear, reason);
+      });
+    }
+
+    // ════════════════════════════════════════════════
+    //  ADMIN LINE MAPPINGS (source A+E+F)
+    // ════════════════════════════════════════════════
+    let _mappingRows = [];
+
+    function loadAdminMappings() {
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.success) return;
+          _mappingRows = res.rows || [];
+          _renderMappingList(_mappingRows);
+        })
+        .withFailureHandler(err => console.error('loadAdminMappings:', err.message))
+        .getAdminLineMappings();
+    }
+
+    function syncGroupsFromSource() {
+      Swal.fire({
+        title: 'ซิงค์ Admin_Line + กลุ่มงาน?',
+        html: `ระบบจะจับคู่ชื่อโครงการใน DS8 (ปี ${_selectedYear})<br>กับ source sheet แล้วเติม <b>สายบริหาร</b> และ <b>กลุ่มงาน</b><br>ให้อัตโนมัติ (เฉพาะแถวที่ยังว่างอยู่)`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#7c3aed',
+        confirmButtonText: '<i class="fas fa-magic"></i> ซิงค์เลย',
+        cancelButtonText: 'ยกเลิก',
+      }).then(r => {
+        if (!r.isConfirmed) return;
+        const btn = document.getElementById('btn-sync-source');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังซิงค์...'; }
+        showLoading('กำลังซิงค์ข้อมูล...');
+        google.script.run
+          .withSuccessHandler(res => {
+            hideLoading();
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-magic"></i> ซิงค์จาก Source'; }
+            if (!res || !res.success) { showError(res && res.message || 'เกิดข้อผิดพลาด'); return; }
+            Swal.fire({
+              icon: 'success',
+              title: 'ซิงค์สำเร็จ',
+              text: res.message || `อัปเดต ${res.updated} โครงการ`,
+              timer: 2500,
+              showConfirmButton: false,
+            });
+            // โหลดใหม่: mapping + projects
+            loadAdminMappings();
+            loadPlanData();
+          })
+          .withFailureHandler(err => {
+            hideLoading();
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-magic"></i> ซิงค์จาก Source'; }
+            showError(err.message || String(err));
+          })
+          .syncDS8GroupsFromSource(_selectedYear);
+      });
+    }
+
+    function _renderMappingList(rows) {
+      const el = document.getElementById('mapping-list');
+      if (!el) return;
+      if (!rows.length) {
+        el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-dim)">ยังไม่มีข้อมูล — กดเพิ่มการเชื่อมโยง</div>';
+        return;
+      }
+
+      // จัดกลุ่มตามสายบริหาร
+      const grouped = {};
+      rows.forEach(r => {
+        const k = r.adminLine || '(ไม่ระบุ)';
+        if (!grouped[k]) grouped[k] = [];
+        grouped[k].push(r);
+      });
+
+      // index DS8 projects by group
+      const projByGroup = {};
+      (_projects || []).forEach(p => {
+        const g = p.group || '';
+        if (!projByGroup[g]) projByGroup[g] = [];
+        projByGroup[g].push(p);
+      });
+
+      const colors = ['#eff6ff','#f5f3ff','#f0fdfa','#fffbeb','#f8fafc','#fef3c7'];
+      let html = '';
+      Object.entries(grouped).forEach(([adminLine, items], gi) => {
+        const bg = colors[gi % colors.length];
+        const totalProjects = items.reduce((s, r) => s + (projByGroup[r.group] || []).length, 0);
+        html += `
+        <div style="border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 20px;background:${bg}">
+            <div style="font-size:13px;font-weight:700;color:var(--navy)">
+              <i class="fas fa-user-tie" style="margin-right:6px;opacity:.6"></i>${adminLine}
+              <span style="font-size:11px;font-weight:400;color:var(--text-dim);margin-left:8px">${items.length} กลุ่มงาน · ${totalProjects} โครงการ (DS8)</span>
+            </div>
+            <button class="btn" style="padding:3px 10px;font-size:11px"
+              onclick="openMappingForm({adminLine:'${adminLine.replace(/'/g,"\\'")}',rowIndex:0})">
+              <i class="fas fa-plus"></i> เพิ่มกลุ่มงาน
+            </button>
+          </div>`;
+
+        items.forEach(r => {
+          const projs = projByGroup[r.group] || [];
+          const groupLabel = r.group || '<span style="color:var(--text-dim)">—</span>';
+          html += `
+          <div style="border-top:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 20px 7px 36px;background:#fafafa">
+              <div style="font-size:13px;font-weight:600;color:var(--navy)">
+                <i class="fas fa-layer-group" style="font-size:10px;margin-right:6px;opacity:.5"></i>${groupLabel}
+                <span style="font-size:11px;font-weight:400;color:var(--text-dim);margin-left:6px">${projs.length} โครงการ</span>
+              </div>
+              <div style="display:flex;gap:4px">
+                <button class="btn" style="padding:2px 8px;font-size:11px"
+                  onclick="openMappingForm(${JSON.stringify(r).replace(/"/g,'&quot;')})">แก้ไข</button>
+                <button class="btn" style="padding:2px 8px;font-size:11px;color:#b91c1c;border-color:#fecaca;background:#fff5f5"
+                  onclick="confirmDeleteMapping(${r.rowIndex},'${(r.group||adminLine).replace(/'/g,"\\'")}')">ลบ</button>
+              </div>
+            </div>
+            ${projs.length ? `
+            <div style="padding:4px 20px 8px 52px;display:flex;flex-wrap:wrap;gap:6px">
+              ${projs.map(p => {
+                const [pbg, pclr] = (_wtBadge[p.wtype]||'#f1f5f9:#64748b').split(':');
+                return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:${pbg};border-radius:999px;font-size:11px;color:${pclr};font-weight:500">
+                  <span style="font-weight:700">${p.wtype}</span> ${p.name}
+                </span>`;
+              }).join('')}
+            </div>` : `<div style="padding:4px 52px 8px;font-size:11px;color:var(--text-dim)">ยังไม่มีโครงการใน DS8 สำหรับกลุ่มนี้</div>`}
+          </div>`;
+        });
+
+        html += '</div>';
+      });
+      el.innerHTML = html;
+    }
+
+    function openMappingForm(data) {
+      const isEdit = data && data.rowIndex >= 2;
+      document.getElementById('mapping-modal-title').textContent = isEdit ? 'แก้ไขการเชื่อมโยง' : 'เพิ่มการเชื่อมโยง';
+      document.getElementById('mapping-row-index').value = (data && data.rowIndex) ? data.rowIndex : 0;
+      document.getElementById('mapping-admin-line').value = (data && data.adminLine) ? data.adminLine : '';
+      document.getElementById('mapping-group').value = (data && data.group) ? data.group : '';
+
+      // เติม datalist จาก existing data
+      const adminLines = [...new Set(_mappingRows.map(r => r.adminLine).filter(Boolean))];
+      const groups = [...new Set(_mappingRows.map(r => r.group).filter(Boolean))];
+      document.getElementById('mapping-admin-list').innerHTML = adminLines.map(v => `<option value="${v}">`).join('');
+      document.getElementById('mapping-group-list').innerHTML = groups.map(v => `<option value="${v}">`).join('');
+
+      document.getElementById('modal-mapping').style.display = 'flex';
+    }
+
+    function closeMappingForm() {
+      document.getElementById('modal-mapping').style.display = 'none';
+    }
+
+    function saveMappingForm() {
+      const payload = {
+        rowIndex:  parseInt(document.getElementById('mapping-row-index').value) || 0,
+        adminLine: document.getElementById('mapping-admin-line').value.trim(),
+        group:     document.getElementById('mapping-group').value.trim(),
+      };
+      if (!payload.adminLine) { showError('กรุณาระบุสายบริหาร'); return; }
+      showLoading('กำลังบันทึก...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (!res || !res.success) { showError(res && res.message); return; }
+          closeMappingForm();
+          loadAdminMappings();
+          // รีเซ็ต sourceRef เพื่อให้ dropdown กันเงินโหลดใหม่
+          _sourceRef = null;
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message); })
+        .saveAdminLineMapping(payload);
+    }
+
+    function confirmDeleteMapping(rowIndex, label) {
+      Swal.fire({
+        title: `ลบ "${label}"?`,
+        text: 'การเชื่อมโยงนี้จะถูกลบออกจาก source sheet',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#e11d48',
+        confirmButtonText: 'ลบ',
+        cancelButtonText: 'ยกเลิก',
+      }).then(r => {
+        if (!r.isConfirmed) return;
+        showLoading('กำลังลบ...');
+        google.script.run
+          .withSuccessHandler(res => {
+            hideLoading();
+            if (!res || !res.success) { showError(res && res.message); return; }
+            loadAdminMappings();
+            _sourceRef = null;
+          })
+          .withFailureHandler(err => { hideLoading(); showError(err.message); })
+          .deleteAdminLineMapping(rowIndex);
+      });
+    }
+
+    // ════════════════════════════════════════════════
+    //  DS8 PROJECTS — Module 2
+    // ════════════════════════════════════════════════
+    let _projects      = [];
+    let _planActivities = [];  // all DS9 for current FY
+    let _ds6ByProject  = {};   // DS6 totals grouped by project name (DS9↔DS6 link)
+    const _wtBadge  = { A:'#eff6ff:#2457a0', B:'#f5f3ff:#7c3aed', C:'#f0fdfa:#0d9488', D:'#fffbeb:#d97706' };
+    const _wtBorder = { A:'#bfdbfe', B:'#ddd6fe', C:'#99f6e4', D:'#fde68a' };
+    const _MONTHS   = ['ต.ค.','พ.ย.','ธ.ค.','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.'];
+    const _TARGET_PCT = [8,16,24,32,40,50,58,66,74,82,90,100];
+
+    const _statusStyle = {
+      'ยังไม่เริ่ม':    '#f1f5f9:#64748b',
+      'รอดำเนินการ':    '#fffbeb:#d97706',
+      'กำลังดำเนินการ': '#eff6ff:#2457a0',
+      'เสร็จสิ้น':      '#f0fdf4:#16a34a',
+      'ยกเลิก':         '#fff1f2:#e11d48',
+    };
+
+    // โหลด DS8 + DS9 พร้อมกัน แล้ว render ทุกอย่าง
+    function loadPlanData() {
+      google.script.run
+        .withSuccessHandler(pRes => {
+          if (!pRes || !pRes.success) return;
+          _projects = pRes.rows || [];
+          google.script.run
+            .withSuccessHandler(aRes => {
+              _planActivities = (aRes && aRes.rows) || [];
+              google.script.run
+                .withSuccessHandler(d6Res => {
+                  _ds6ByProject = (d6Res && d6Res.success) ? (d6Res.byProject || {}) : {};
+                  _renderAll();
+                })
+                .withFailureHandler(() => { _ds6ByProject = {}; _renderAll(); })
+                .getDS6SummaryByProject(_selectedYear);
+            })
+            .withFailureHandler(err => { _planActivities = []; _ds6ByProject = {}; _renderAll(); })
+            .getActivitiesByYear(_selectedYear);
+        })
+        .withFailureHandler(err => console.error('loadPlanData:', err.message))
+        .getProjects(_selectedYear);
+    }
+
+    function loadProjects() { loadPlanData(); }  // alias ที่ปุ่มรีเฟรชใช้
+
+    function _renderAll() {
+      _renderProjectKpi(_projects);
+      _renderGanttChart(_projects, _planActivities);
+      _renderProjectTable(_projects, _planActivities);
+      _renderMappingList(_mappingRows);
+      const meta = document.getElementById('proj-meta');
+      if (meta) meta.textContent = `${_projects.length} โครงการ · รวม ${fmt(_projects.reduce((s,r)=>s+r.budget,0))} บาท`;
+      const planMeta = document.getElementById('plan-meta');
+      if (planMeta) planMeta.textContent = `ปีงบประมาณ ${_selectedYear} · ${_projects.length} โครงการ · ${_planActivities.length} กิจกรรม`;
+    }
+
+    // ── KPI strip A/B/C/D ────────────────────────────────────────
+    function _renderProjectKpi(rows) {
+      const el = document.getElementById('proj-kpi');
+      if (!el) return;
+      const byType = { A:0, B:0, C:0, D:0 };
+      const counts = { A:0, B:0, C:0, D:0 };
+      rows.forEach(r => {
+        if (byType[r.wtype] != null) { byType[r.wtype] += r.budget; counts[r.wtype]++; }
+      });
+      const totalABC = (byType.A + byType.B + byType.C) || 1;
+      const labels = { A:'A ยุทธศาสตร์', B:'B นโยบาย', C:'C พื้นฐาน', D:'D ตามสิทธิ์' };
+      el.innerHTML = ['A','B','C','D'].map(k => {
+        const [bg, clr] = (_wtBadge[k]||'#f1f5f9:#64748b').split(':');
+        const sub = k === 'D'
+          ? `${counts[k]} โครงการ · แสดงเฉยๆ`
+          : `${counts[k]} โครงการ · ${(byType[k]/totalABC*100).toFixed(1)}% ของ ABC`;
+        return `<div style="padding:12px 16px;background:${bg};border-right:1px solid var(--border)">
+          <div style="font-size:11px;color:${clr};font-weight:600">${labels[k]}</div>
+          <div style="font-size:18px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${clr}">${fmt(byType[k])}</div>
+          <div style="font-size:10px;color:${clr};opacity:.8">${sub}</div>
+        </div>`;
+      }).join('');
+    }
+
+    // ── Gantt Chart (DS9-based) ───────────────────────────────────
+    function _renderGanttChart(projects, activities) {
+      const wrap = document.getElementById('gantt-wrap');
+      if (!wrap) return;
+      if (!projects.length) {
+        wrap.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-dim)">ยังไม่มีโครงการ — กดเพิ่มโครงการ</div>';
+        return;
+      }
+
+      // group activities by projectId
+      const actByProj = {};
+      (activities || []).forEach(a => {
+        if (!actByProj[a.projectId]) actByProj[a.projectId] = [];
+        actByProj[a.projectId].push(a);
+      });
+
+      // sum monthly budget per project from DS9 (non-cancelled)
+      function projMonths(pid) {
+        const m = Array(12).fill(0);
+        (actByProj[pid] || []).forEach(a => {
+          if (a.status === 'ยกเลิก') return;
+          if (a.month != null && a.month >= 0 && a.month < 12) m[a.month] += a.budget;
+        });
+        return m;
+      }
+
+      // totals
+      const monthTotals = Array(12).fill(0);
+      const totalBudget = projects.reduce((s,r) => s + r.budget, 0) || 1;
+      projects.forEach(p => {
+        const pm = projMonths(p.id);
+        pm.forEach((v,i) => { monthTotals[i] += v; });
+      });
+      const grandTotal = monthTotals.reduce((s,v) => s+v, 0);
+      let cum = 0;
+      const cumPct = monthTotals.map(v => { cum += v; return (cum/totalBudget*100); });
+
+      const sorted = [...projects].sort((a,b) => (a.wtype||'').localeCompare(b.wtype||'') || a.name.localeCompare(b.name));
+
+      const TH = `style="padding:6px 8px;white-space:nowrap;font-size:11px;color:var(--text-dim);font-weight:600;border-bottom:2px solid var(--border);background:#f8fafc;text-align:center"`;
+      let html = `<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px">
+        <thead><tr>
+          <th style="padding:6px 12px;text-align:left;font-size:11px;color:var(--text-dim);font-weight:600;border-bottom:2px solid var(--border);background:#f8fafc;min-width:200px">โครงการ / กิจกรรม</th>
+          <th ${TH} style="width:36px">ประเภท</th>
+          <th ${TH} style="width:80px">กิจกรรม</th>
+          ${_MONTHS.map((m,i) => `<th ${TH} style="min-width:62px">${m}<div style="font-size:9px;color:#94a3b8">เป้า ${_TARGET_PCT[i]}%</div></th>`).join('')}
+          <th ${TH} style="padding-right:14px">รวม</th>
+        </tr></thead>
+        <tbody>`;
+
+      sorted.forEach(proj => {
+        const [bg, clr] = (_wtBadge[proj.wtype]||'#f1f5f9:#64748b').split(':');
+        const border     = _wtBorder[proj.wtype] || '#e2e8f0';
+        const pm         = projMonths(proj.id);
+        const rowTotal   = pm.reduce((s,v) => s+v, 0);
+        const acts       = actByProj[proj.id] || [];
+        const actCount   = acts.length;
+        const projId     = proj.id.replace(/'/g, "\\'");
+
+        // Project row
+        html += `<tr style="border-top:2px solid var(--border);background:${bg}" class="gantt-proj-row"
+                   onclick="_toggleActRows('${projId}')" style="cursor:pointer">
+          <td style="padding:7px 12px;font-weight:700;color:${clr};cursor:pointer">
+            <i class="fas fa-chevron-right" id="chevron-${projId}" style="font-size:9px;margin-right:6px;transition:.2s"></i>
+            ${proj.name}
+          </td>
+          <td style="text-align:center;padding:4px">
+            <span style="font-size:10px;font-weight:700;padding:2px 5px;border-radius:3px;background:${clr}22;color:${clr}">${proj.wtype}</span>
+          </td>
+          <td style="text-align:center;padding:4px">
+            <button class="btn" style="padding:2px 8px;font-size:10px;background:${clr}22;border-color:${border};color:${clr}"
+              onclick="event.stopPropagation();openActivityPanel('${projId}')">
+              ${actCount} กิจกรรม
+            </button>
+          </td>
+          ${pm.map(v => {
+            if (!v) return `<td style="padding:4px 6px;text-align:center;color:#cbd5e1;font-size:11px">—</td>`;
+            return `<td style="padding:4px 6px;text-align:right;background:${bg};border-left:2px solid ${border};font-family:'IBM Plex Mono',monospace;font-size:11px;color:${clr};font-weight:600">${v>=1000?(v/1000).toFixed(0)+'K':v}</td>`;
+          }).join('')}
+          <td style="padding:4px 14px 4px 6px;text-align:right;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${clr}">${rowTotal ? fmt(rowTotal) : '<span style="opacity:.4">—</span>'}</td>
+        </tr>`;
+
+        // Activity sub-rows (hidden by default)
+        acts.forEach(a => {
+          const st = a.status || 'แผน';
+          const [stBg, stClr] = (_statusStyle[st]||'#f1f5f9:#64748b').split(':');
+          const isCancel = st === 'ยกเลิก';
+          const isMove   = a.origMonth != null && a.origMonth !== a.month;
+          const monthLabel = a.month != null ? _MONTHS[a.month] : '—';
+          html += `<tr class="gantt-act-row gantt-act-${projId}" style="display:none;border-top:1px solid var(--border)98;background:#fafafa">
+            <td style="padding:5px 12px 5px 36px;font-size:12px;${isCancel?'text-decoration:line-through;color:var(--text-dim)':''}">
+              ${isMove ? '<span style="font-size:9px;background:#fef3c7;color:#d97706;padding:1px 4px;border-radius:3px;margin-right:4px">เลื่อน</span>' : ''}
+              ${a.name}
+              ${a.meetingDate ? `<span style="font-size:10px;color:var(--text-dim);margin-left:6px"><i class="fas fa-calendar-day"></i> ${a.meetingDate}</span>` : ''}
+            </td>
+            <td></td>
+            <td style="text-align:center;padding:4px">
+              <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:${stBg};color:${stClr}">${st}</span>
+            </td>
+            ${Array(12).fill(0).map((_,mi) => {
+              if (a.month !== mi) return `<td style="padding:4px 6px;text-align:center;color:#e2e8f0;font-size:10px">·</td>`;
+              return `<td style="padding:4px 6px;text-align:right;background:${isCancel?'#fff1f2':bg}33;border-left:2px solid ${isCancel?'#fecaca':border};font-family:'IBM Plex Mono',monospace;font-size:11px;color:${isCancel?'#e11d48':clr};${isCancel?'text-decoration:line-through':''}">${fmt(a.budget)}</td>`;
+            }).join('')}
+            <td style="padding:4px 14px 4px 6px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:11px;${isCancel?'color:#e11d48;text-decoration:line-through':''}">${fmt(a.budget)}</td>
+          </tr>`;
+        });
+      });
+
+      // Monthly totals row
+      html += `<tr style="border-top:2px solid var(--border);background:#f8fafc;font-weight:700">
+        <td style="padding:6px 12px;font-size:11px;color:var(--text-dim)" colspan="3">รวมรายเดือน (DS9)</td>
+        ${monthTotals.map(v => `<td style="padding:4px 6px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:11px">${v?fmt(v):''}</td>`).join('')}
+        <td style="padding:4px 14px 4px 6px;text-align:right;font-family:'IBM Plex Mono',monospace">${fmt(grandTotal)}</td>
+      </tr>`;
+
+      // Cumulative % row
+      html += `<tr style="background:#f1f5f9">
+        <td style="padding:4px 12px;font-size:10px;color:var(--text-dim)" colspan="3">% สะสม vs เป้า</td>
+        ${cumPct.map((pct,i) => {
+          const diff = pct - _TARGET_PCT[i];
+          const c = diff >= 0 ? '#16a34a' : diff >= -5 ? '#d97706' : '#dc2626';
+          return `<td style="padding:4px 6px;text-align:center;font-size:10px;font-weight:600;color:${c}">${pct.toFixed(0)}%</td>`;
+        }).join('')}
+        <td></td>
+      </tr></tbody></table>`;
+
+      wrap.innerHTML = html;
+    }
+
+    function _toggleActRows(projId) {
+      const rows = document.querySelectorAll('.gantt-act-' + projId);
+      const chevron = document.getElementById('chevron-' + projId);
+      const isOpen = rows.length && rows[0].style.display !== 'none';
+      rows.forEach(r => { r.style.display = isOpen ? 'none' : ''; });
+      if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(90deg)';
+    }
+
+    // ── Project Table ─────────────────────────────────────────────
+    function _renderProjectTable(rows, acts) {
+      const tbody = document.getElementById('proj-tbody');
+      if (!tbody) return;
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-dim)">ยังไม่มีโครงการ — กดเพิ่มโครงการ</td></tr>';
+        return;
+      }
+      // count activities per project
+      const actCount = {};
+      (acts || []).forEach(a => { actCount[a.projectId] = (actCount[a.projectId]||0) + 1; });
+
+      const sorted = [...rows].sort((a,b) => (a.wtype||'').localeCompare(b.wtype||'') || a.name.localeCompare(b.name));
+      tbody.innerHTML = sorted.map((r, i) => {
+        const [bg, clr] = (_wtBadge[r.wtype]||'#f1f5f9:#64748b').split(':');
+        const stStyle    = (_statusStyle[r.status]||'#f1f5f9:#64748b').split(':');
+        const monthLabel = r.startMonth != null ? _MONTHS[r.startMonth] : '—';
+        const nAct       = actCount[r.id] || 0;
+        const pid        = r.id.replace(/'/g,"\\'");
+        return `<tr>
+          <td style="text-align:center;color:var(--text-dim)">${i+1}</td>
+          <td style="font-weight:500;max-width:180px">${r.name}</td>
+          <td style="color:var(--text-dim);font-size:12px">${r.adminLine||'—'}</td>
+          <td style="color:var(--text-dim);font-size:12px">${r.group||'—'}</td>
+          <td style="text-align:center">
+            <span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px;background:${bg};color:${clr}">${r.wtype}</span>
+          </td>
+          <td style="text-align:right">
+            <div style="font-family:'IBM Plex Mono',monospace">${fmt(r.budget)}</div>
+            ${(()=>{ const d6=_ds6ByProject[r.name]; if(!d6||!d6.budget) return ''; const pct=r.budget>0?Math.round(d6.budget/r.budget*100):0; const c=pct>=80?'#16a34a':pct>=40?'#d97706':'#64748b'; return `<div style="font-size:10px;color:${c};margin-top:2px"><i class="fas fa-link" style="opacity:.6"></i> DS6 ${fmt(d6.budget)} (${pct}%)</div>`; })()}
+          </td>
+          <td style="text-align:center;font-size:12px">${monthLabel}</td>
+          <td style="text-align:center">
+            <span style="font-size:10px;padding:2px 7px;border-radius:999px;background:${stStyle[0]};color:${stStyle[1]}">${r.status||'—'}</span>
+          </td>
+          <td style="text-align:center">
+            <div style="display:flex;gap:3px;justify-content:center;flex-wrap:wrap">
+              <button class="btn" style="padding:2px 8px;font-size:11px;background:${bg};border-color:${_wtBorder[r.wtype]||'#e2e8f0'};color:${clr}"
+                onclick="openActivityPanel('${pid}')">
+                <i class="fas fa-list-ul"></i> ${nAct} กิจกรรม
+              </button>
+              <button class="btn" style="padding:2px 7px;font-size:11px"
+                onclick="openProjectForm(${JSON.stringify(r).replace(/"/g,'&quot;')})"><i class="fas fa-edit"></i></button>
+              <button class="btn" style="padding:2px 7px;font-size:11px;color:#b91c1c;border-color:#fecaca;background:#fff5f5"
+                onclick="confirmDeleteProject('${r.id}','${r.name.replace(/'/g,"\\'")}')"><i class="fas fa-trash"></i></button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    // ── Project Form ──────────────────────────────────────────────
+    function _buildMonthsGrid(mArr) {
+      const grid = document.getElementById('proj-months-grid');
+      if (!grid) return;
+      grid.innerHTML = _MONTHS.map((label, i) => `
+        <div>
+          <label style="font-size:10px;color:var(--text-dim);display:block;margin-bottom:3px">${label}</label>
+          <input type="number" id="proj-m${i}" class="input-field" style="padding:5px 8px;font-size:12px"
+            value="${mArr ? (mArr[i]||0) : 0}" min="0" step="0.01" oninput="_updateMonthSum()">
+        </div>`).join('');
+      _updateMonthSum();
+    }
+
+    function _updateMonthSum() {
+      let sum = 0;
+      for (let i = 0; i < 12; i++) {
+        const el = document.getElementById('proj-m' + i);
+        if (el) sum += parseFloat(el.value) || 0;
+      }
+      const lbl = document.getElementById('proj-month-sum-label');
+      if (lbl) lbl.textContent = `รวมรายเดือน: ${fmt(sum)} บาท`;
+    }
+
+    function autoDistributeBudget() {
+      const total = parseFloat(document.getElementById('proj-budget').value) || 0;
+      if (!total) return;
+      const sm = document.getElementById('proj-start-month').value;
+      const startIdx = sm !== '' ? parseInt(sm) : 0;
+      const remaining = 12 - startIdx;
+      const base = Math.floor(total / remaining);
+      const extra = Math.round(total - base * remaining);
+      for (let i = 0; i < 12; i++) {
+        const el = document.getElementById('proj-m' + i);
+        if (!el) continue;
+        if (i < startIdx) { el.value = 0; continue; }
+        el.value = (i === startIdx) ? (base + extra) : base;
+      }
+      _updateMonthSum();
+    }
+
+    function openProjectForm(data) {
+      const isEdit = data && data.id;
+      document.getElementById('proj-form-title').textContent = isEdit ? 'แก้ไขโครงการ' : 'เพิ่มโครงการ';
+      document.getElementById('proj-id').value          = (data && data.id)          || '';
+      document.getElementById('proj-name').value        = (data && data.name)        || '';
+      document.getElementById('proj-admin-line').value  = (data && data.adminLine)   || '';
+      document.getElementById('proj-group').value       = (data && data.group)       || '';
+      document.getElementById('proj-wtype').value       = (data && data.wtype)       || 'A';
+      document.getElementById('proj-status').value      = (data && data.status)      || 'ยังไม่เริ่ม';
+      document.getElementById('proj-budget').value      = (data && data.budget)      || '';
+      document.getElementById('proj-note').value        = (data && data.note)        || '';
+      document.getElementById('proj-start-month').value = (data && data.startMonth != null) ? String(data.startMonth) : '';
+      document.getElementById('proj-meeting-date').value= (data && data.meetingDate) || '';
+      // datalist autocomplete
+      const adminLines = [...new Set(_mappingRows.map(r => r.adminLine).filter(Boolean))];
+      const groups     = [...new Set(_mappingRows.map(r => r.group).filter(Boolean))];
+      document.getElementById('proj-admin-list').innerHTML = adminLines.map(v => `<option value="${v}">`).join('');
+      document.getElementById('proj-group-list').innerHTML = groups.map(v => `<option value="${v}">`).join('');
+      // monthly grid
+      _buildMonthsGrid(data && data.m);
+      document.getElementById('modal-project').style.display = 'flex';
+    }
+
+    function closeProjectForm() {
+      document.getElementById('modal-project').style.display = 'none';
+    }
+
+    function saveProjectForm() {
+      const sm = document.getElementById('proj-start-month').value;
+      const months = [];
+      for (let i = 0; i < 12; i++) {
+        const el = document.getElementById('proj-m' + i);
+        months.push(el ? (parseFloat(el.value) || 0) : 0);
+      }
+      const payload = {
+        id:           document.getElementById('proj-id').value.trim(),
+        fiscalYear:   _selectedYear,
+        name:         document.getElementById('proj-name').value.trim(),
+        adminLine:    document.getElementById('proj-admin-line').value.trim(),
+        group:        document.getElementById('proj-group').value.trim(),
+        wtype:        document.getElementById('proj-wtype').value,
+        status:       document.getElementById('proj-status').value,
+        budget:       parseFloat(document.getElementById('proj-budget').value) || 0,
+        note:         document.getElementById('proj-note').value.trim(),
+        startMonth:   sm !== '' ? parseInt(sm) : null,
+        meetingDate:  document.getElementById('proj-meeting-date').value,
+        m:            months,
+      };
+      if (!payload.name) { showError('กรุณาระบุชื่อโครงการ'); return; }
+      showLoading('กำลังบันทึก...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (!res || !res.success) { showError(res && res.message); return; }
+          closeProjectForm();
+          loadProjects();
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message); })
+        .saveProject(payload);
+    }
+
+    function confirmDeleteProject(id, name) {
+      Swal.fire({
+        title: `ลบ "${name}"?`,
+        text: 'กิจกรรมทั้งหมดในโครงการนี้จะยังคงอยู่ใน DS9',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#e11d48',
+        confirmButtonText: 'ลบโครงการ',
+        cancelButtonText: 'ยกเลิก',
+      }).then(r => {
+        if (!r.isConfirmed) return;
+        showLoading('กำลังลบ...');
+        google.script.run
+          .withSuccessHandler(res => {
+            hideLoading();
+            if (!res || !res.success) { showError(res && res.message); return; }
+            loadPlanData();
+          })
+          .withFailureHandler(err => { hideLoading(); showError(err.message); })
+          .deleteProject(id);
+      });
+    }
+
+    // ════════════════════════════════════════════════
+    //  DS9 ACTIVITIES — Panel CRUD
+    // ════════════════════════════════════════════════
+    let _actPanelProjectId = null;
+
+    function openActivityPanel(projectId) {
+      _actPanelProjectId = projectId;
+      const proj = _projects.find(p => p.id === projectId);
+      const el = document.getElementById('act-panel-title');
+      if (el && proj) {
+        const [bg, clr] = (_wtBadge[proj.wtype]||'#f1f5f9:#64748b').split(':');
+        el.innerHTML = `<span style="font-size:11px;font-weight:700;padding:2px 7px;border-radius:3px;background:${bg};color:${clr};margin-right:8px">${proj.wtype}</span>${proj.name}`;
+      }
+      const panel = document.getElementById('modal-activity-panel');
+      if (panel) panel.style.display = 'flex';
+      _renderActivityPanel(projectId);
+    }
+
+    function closeActivityPanel() {
+      document.getElementById('modal-activity-panel').style.display = 'none';
+      _actPanelProjectId = null;
+      document.getElementById('modal-activity-form').style.display = 'none';
+      // ลบ DS6 bar เพื่อไม่ให้ค้างเมื่อเปิด project ถัดไป
+      const bar = document.getElementById('act-panel-ds6-bar');
+      if (bar) bar.remove();
+    }
+
+    function _renderActivityPanel(projectId) {
+      const acts = _planActivities.filter(a => a.projectId === projectId);
+      const tbody = document.getElementById('act-panel-tbody');
+      if (!tbody) return;
+
+      // DS9 plan totals
+      const ds9Budget = acts.filter(a=>a.status!=='ยกเลิก').reduce((s,a)=>s+a.budget,0);
+
+      // DS6 actuals — match by project name
+      const proj = _projects.find(p => p.id === projectId);
+      const projName = proj ? proj.name : '';
+      const ds6 = _ds6ByProject[projName] || { budget: 0, paid: 0, count: 0 };
+      const ds6Diff = ds9Budget - ds6.budget;
+      const ds6Pct  = ds9Budget > 0 ? Math.round(ds6.budget / ds9Budget * 100) : 0;
+
+      // summary line
+      const summary = document.getElementById('act-panel-summary');
+      if (summary) {
+        const byStatus = {};
+        acts.forEach(a => { byStatus[a.status] = (byStatus[a.status]||0)+1; });
+        summary.textContent = `DS9: ${acts.length} กิจกรรม · แผนรวม ${fmt(ds9Budget)} บาท · ` +
+          Object.entries(byStatus).map(([k,v])=>`${k} ${v}`).join(' · ');
+      }
+
+      // DS6 comparison bar (inject/replace after summary)
+      const panelHeader = summary && summary.closest('.modal-header');
+      let ds6Bar = document.getElementById('act-panel-ds6-bar');
+      if (!ds6Bar && panelHeader) {
+        ds6Bar = document.createElement('div');
+        ds6Bar.id = 'act-panel-ds6-bar';
+        ds6Bar.style.cssText = 'padding:8px 20px;background:#f8fafc;border-top:1px solid var(--border);font-size:12px;display:flex;gap:20px;align-items:center;flex-wrap:wrap';
+        panelHeader.after(ds6Bar);
+      }
+      if (ds6Bar) {
+        const barClr = ds6Pct >= 80 ? '#16a34a' : ds6Pct >= 40 ? '#d97706' : '#64748b';
+        const diffLabel = ds6Diff >= 0
+          ? `<span style="color:#16a34a">คงเหลือ ${fmt(ds6Diff)}</span>`
+          : `<span style="color:#e11d48">เกินแผน ${fmt(Math.abs(ds6Diff))}</span>`;
+        ds6Bar.innerHTML = `
+          <span style="font-weight:600;color:var(--navy)"><i class="fas fa-link" style="margin-right:5px;opacity:.5"></i>DS6 กันเงินรายวัน</span>
+          <span>กันเงินแล้ว <strong style="color:${barClr}">${fmt(ds6.budget)}</strong> บาท
+            <span style="color:var(--text-dim)">(${ds6.count} รายการ)</span></span>
+          <span>เบิกแล้ว <strong>${fmt(ds6.paid)}</strong> บาท</span>
+          <span>${diffLabel} จากแผน DS9</span>
+          <span style="color:var(--text-dim)">${ds6Pct}% ของแผน</span>
+          ${!projName ? '<span style="color:#e11d48;font-size:11px"><i class="fas fa-exclamation-triangle"></i> ชื่อโครงการใน DS6 ต้องตรงกับ DS8 ถึงจะ link ได้</span>' : ''}`;
+      }
+
+      if (!acts.length) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-dim)">
+          ยังไม่มีกิจกรรม — กดเพิ่มกิจกรรม</td></tr>`;
+        return;
+      }
+
+      const sorted = [...acts].sort((a,b) => (a.month??99) - (b.month??99));
+      tbody.innerHTML = sorted.map(a => {
+        const [stBg, stClr] = (_statusStyle[a.status]||'#f1f5f9:#64748b').split(':');
+        const isCancel = a.status === 'ยกเลิก';
+        const isMove   = a.origMonth != null && a.origMonth !== a.month;
+        const mLabel   = a.month != null ? _MONTHS[a.month] : '—';
+        const origLbl  = isMove ? ` <span style="font-size:9px;background:#fef3c7;color:#d97706;padding:1px 4px;border-radius:3px">(เดิม ${_MONTHS[a.origMonth]})</span>` : '';
+        return `<tr style="border-top:1px solid var(--border);${isCancel?'opacity:.55':''}">
+          <td style="padding:7px 12px;font-size:13px;${isCancel?'text-decoration:line-through':''}">${a.name}</td>
+          <td style="text-align:center;font-size:12px">${mLabel}${origLbl}</td>
+          <td style="text-align:center;font-size:12px">${a.meetingDate||'—'}</td>
+          <td style="text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px">${fmt(a.budget)}</td>
+          <td style="text-align:center">
+            <span style="font-size:10px;padding:2px 8px;border-radius:999px;background:${stBg};color:${stClr}">${a.status}</span>
+          </td>
+          <td style="text-align:center;font-size:11px;color:var(--text-dim);max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${a.note||''}">${a.note||'—'}</td>
+          <td style="text-align:center;padding:4px 8px">
+            <div style="display:flex;gap:3px;justify-content:center">
+              <button class="btn" style="padding:2px 7px;font-size:11px"
+                onclick="openActivityForm(${JSON.stringify(a).replace(/"/g,'&quot;')})"><i class="fas fa-edit"></i></button>
+              <button class="btn" style="padding:2px 7px;font-size:11px;color:#b91c1c;border-color:#fecaca;background:#fff5f5"
+                onclick="confirmDeleteActivity('${a.id}','${a.name.replace(/'/g,"\\'")}')"><i class="fas fa-trash"></i></button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    function openActivityForm(data) {
+      const isEdit = data && data.id;
+      document.getElementById('act-form-title').textContent = isEdit ? 'แก้ไขกิจกรรม' : 'เพิ่มกิจกรรม';
+      document.getElementById('act-id').value            = (data && data.id)           || '';
+      document.getElementById('act-name').value          = (data && data.name)         || '';
+      document.getElementById('act-month').value         = (data && data.month != null) ? String(data.month) : '';
+      document.getElementById('act-meeting-date').value  = (data && data.meetingDate)  || '';
+      document.getElementById('act-budget').value        = (data && data.budget)       || '';
+      document.getElementById('act-status').value        = (data && data.status)       || 'แผน';
+      document.getElementById('act-note').value          = (data && data.note)         || '';
+      document.getElementById('act-change-reason').value = (data && data.changeReason) || '';
+      // show changeReason field only on edit
+      const crRow = document.getElementById('act-change-reason-row');
+      if (crRow) crRow.style.display = isEdit ? '' : 'none';
+      document.getElementById('modal-activity-form').style.display = 'flex';
+    }
+
+    function closeActivityForm() {
+      document.getElementById('modal-activity-form').style.display = 'none';
+    }
+
+    function saveActivityForm() {
+      const payload = {
+        id:           document.getElementById('act-id').value.trim(),
+        projectId:    _actPanelProjectId,
+        fiscalYear:   _selectedYear,
+        name:         document.getElementById('act-name').value.trim(),
+        month:        document.getElementById('act-month').value !== '' ? parseInt(document.getElementById('act-month').value) : null,
+        meetingDate:  document.getElementById('act-meeting-date').value,
+        budget:       parseFloat(document.getElementById('act-budget').value) || 0,
+        status:       document.getElementById('act-status').value,
+        note:         document.getElementById('act-note').value.trim(),
+        changeReason: document.getElementById('act-change-reason').value.trim(),
+      };
+      if (!payload.name) { showError('กรุณาระบุชื่อกิจกรรม'); return; }
+      showLoading('กำลังบันทึก...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (!res || !res.success) { showError(res && res.message); return; }
+          closeActivityForm();
+          // reload DS9 แล้ว re-render
+          google.script.run
+            .withSuccessHandler(aRes => {
+              _planActivities = (aRes && aRes.rows) || [];
+              _renderActivityPanel(_actPanelProjectId);
+              _renderGanttChart(_projects, _planActivities);
+              _renderProjectTable(_projects, _planActivities);
+            })
+            .withFailureHandler(() => {})
+            .getActivitiesByYear(_selectedYear);
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message); })
+        .saveActivity(payload);
+    }
+
+    function confirmDeleteActivity(id, name) {
+      Swal.fire({
+        title: `ลบกิจกรรม "${name}"?`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#e11d48',
+        confirmButtonText: 'ลบ',
+        cancelButtonText: 'ยกเลิก',
+      }).then(r => {
+        if (!r.isConfirmed) return;
+        showLoading('กำลังลบ...');
+        google.script.run
+          .withSuccessHandler(res => {
+            hideLoading();
+            if (!res || !res.success) { showError(res && res.message); return; }
+            google.script.run
+              .withSuccessHandler(aRes => {
+                _planActivities = (aRes && aRes.rows) || [];
+                _renderActivityPanel(_actPanelProjectId);
+                _renderGanttChart(_projects, _planActivities);
+                _renderProjectTable(_projects, _planActivities);
+              })
+              .withFailureHandler(() => {})
+              .getActivitiesByYear(_selectedYear);
+          })
+          .withFailureHandler(err => { hideLoading(); showError(err.message); })
+          .deleteActivity(id);
+      });
+    }
+
+    function recalcAdmin() {
+      showLoading('Recalculating DS5...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (res.success) { loadDashboard(); Swal.fire({ icon: 'success', title: 'Recalculate สำเร็จ', timer: 2000, showConfirmButton: false }); }
+          else showError(res.message);
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message); })
+        .manualRecalcAdminAlloc(_selectedYear);
+    }
+
+    function showOverride(id, line, currentAlloc) {
+      Swal.fire({
+        title: `Override ยอดจัดสรร`,
+        html: `<div style="text-align:left"><b>${line}</b><br>ยอดคำนวณ: ${fmt(currentAlloc)} บาท</div>
+          <input id="swal-override" type="number" class="swal2-input" placeholder="ใส่ยอดใหม่">
+          <input id="swal-note" type="text" class="swal2-input" placeholder="หมายเหตุ">`,
+        showCancelButton: true, confirmButtonText: 'บันทึก', cancelButtonText: 'ยกเลิก',
+        preConfirm: () => ({
+          amt: parseFloat(document.getElementById('swal-override').value),
+          note: document.getElementById('swal-note').value,
+        })
+      }).then(res => {
+        if (!res.isConfirmed || isNaN(res.value.amt)) return;
+        showLoading('กำลังบันทึก...');
+        google.script.run
+          .withSuccessHandler(r => {
+            hideLoading();
+            if (r.success) { loadDashboard(); Swal.fire({ icon: 'success', title: 'Override สำเร็จ', timer: 2000, showConfirmButton: false }); }
+            else showError(r.message);
+          })
+          .withFailureHandler(err => { hideLoading(); showError(err.message); })
+          .overrideAdminAlloc(id, res.value.amt, res.value.note);
+      });
+    }
+
+
+    // ════ ADMIN LINE CRUD ════
+    const _POOL_RATIOS = { 'นโยบาย': 0.2578, 'ยุทธศาสตร์': 0.4422, 'พื้นฐาน': 0.30 };
+
+    function openAdminCrud(data) {
+      const isEdit = !!data;
+      document.getElementById('admin-crud-title').textContent = isEdit ? 'แก้ไขสายบริหาร' : 'เพิ่มสายบริหาร';
+      document.getElementById('admin-crud-id').value   = data ? data.id   : '';
+      document.getElementById('admin-crud-line').value = data ? data.line : '';
+      document.getElementById('admin-crud-pool').value = data ? data.pool : 'ยุทธศาสตร์';
+      document.getElementById('admin-crud-note').value = data ? (data.note || '') : '';
+      if (data && data.pct != null) {
+        const poolRatio = _POOL_RATIOS[data.pool] || 1;
+        const linePct   = poolRatio > 0 ? Math.round(data.pct / poolRatio * 10000) / 100 : 0;
+        document.getElementById('admin-crud-pct').value = linePct;
+      } else {
+        document.getElementById('admin-crud-pct').value = '';
+      }
+      updateAdminPctHint();
+      document.getElementById('modal-admin-crud').style.display = 'flex';
+    }
+
+    function closeAdminCrud() {
+      document.getElementById('modal-admin-crud').style.display = 'none';
+    }
+
+    function updateAdminPctHint() {
+      const pool = document.getElementById('admin-crud-pool').value;
+      const pct  = parseFloat(document.getElementById('admin-crud-pct').value) || 0;
+      const ratio = _POOL_RATIOS[pool] || 0;
+      const combined = (ratio * (pct / 100) * 100).toFixed(2);
+      document.getElementById('admin-crud-pct-hint').textContent =
+        pct > 0 ? `= ${combined}% ของงบรวมทั้งหมด (Pool ${pool} × ${pct}%)` : 'กรอก % ที่สายนี้ได้รับภายใน Pool ที่เลือก';
+    }
+
+    function saveAdminLineCrud() {
+      const allocId  = document.getElementById('admin-crud-id').value.trim() || null;
+      const lineName = document.getElementById('admin-crud-line').value.trim();
+      const pool     = document.getElementById('admin-crud-pool').value;
+      const linePct  = parseFloat(document.getElementById('admin-crud-pct').value);
+      const note     = document.getElementById('admin-crud-note').value.trim();
+      if (!lineName) { Swal.fire({ icon:'warning', title:'กรุณากรอกชื่อสายบริหาร', timer:2000, showConfirmButton:false }); return; }
+      if (isNaN(linePct) || linePct < 0 || linePct > 100) { Swal.fire({ icon:'warning', title:'สัดส่วนต้องอยู่ระหว่าง 0–100%', timer:2000, showConfirmButton:false }); return; }
+      const payload = { allocId, lineName, pool, linePct, note, fy: _selectedYear };
+      showLoading('กำลังบันทึก...');
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          if (res.success) {
+            closeAdminCrud();
+            loadDashboard();
+            Swal.fire({ icon:'success', title:'บันทึกสำเร็จ', timer:1500, showConfirmButton:false });
+          } else showError(res.message);
+        })
+        .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+        .saveAdminLine(payload);
+    }
+
+    function confirmDeleteAdminLine(id, name) {
+      Swal.fire({
+        title: `ลบ "${name}"?`,
+        text:  'สายบริหารนี้จะถูกลบออกจาก DS5 และยอดเบิกจ่ายจะไม่แสดงในตารางนี้อีก',
+        icon:  'warning',
+        showCancelButton: true,
+        confirmButtonText:  'ลบ',
+        cancelButtonText:   'ยกเลิก',
+        confirmButtonColor: '#e11d48',
+      }).then(res => {
+        if (!res.isConfirmed) return;
+        showLoading('กำลังลบ...');
+        google.script.run
+          .withSuccessHandler(r => {
+            hideLoading();
+            if (r.success) { loadDashboard(); Swal.fire({ icon:'success', title:'ลบสำเร็จ', timer:1500, showConfirmButton:false }); }
+            else showError(r.message);
+          })
+          .withFailureHandler(err => { hideLoading(); showError(err.message || String(err)); })
+          .deleteAdminLine(id);
+      });
+    }
+
+    // Auto-load dashboard — ใช้ setTimeout เพราะ GAS iframe ต้องการเวลา init
+    // DOMContentLoaded อาจ fire ก่อนที่ google.script.run จะพร้อม
+    setTimeout(function () {
+      if (typeof loadDashboard === 'function') {
+        loadDashboard();
+      }
+    }, 800);
+
+  </script>
