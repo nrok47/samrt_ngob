@@ -2050,18 +2050,18 @@
     }
 
     function submitActivities() {
-      const raw = document.getElementById('act-paste').value.trim();
+      const raw = document.getElementById('ds6-act-paste').value.trim();
       if (!raw) return;
       const rows = raw.split('\n').map(l => l.split(/\t/).map(v => v.trim())).filter(r => r.some(v => v));
-      document.getElementById('act-msg').textContent = `พบ ${rows.length} แถว กำลังนำเข้า...`;
+      document.getElementById('ds6-act-msg').textContent = `พบ ${rows.length} แถว กำลังนำเข้า...`;
       showLoading('กำลังนำเข้ากิจกรรม...');
       google.script.run
         .withSuccessHandler(res => {
           hideLoading();
-          document.getElementById('act-msg').textContent = res.success ? `✅ ${res.message}` : `❌ ${res.message}`;
+          document.getElementById('ds6-act-msg').textContent = res.success ? `✅ ${res.message}` : `❌ ${res.message}`;
           if (res.success) { closeModal('modal-activities'); loadDashboard(); loadActivities(); }
         })
-        .withFailureHandler(err => { hideLoading(); document.getElementById('act-msg').textContent = 'Error: ' + err.message; })
+        .withFailureHandler(err => { hideLoading(); document.getElementById('ds6-act-msg').textContent = 'Error: ' + err.message; })
         .importActivities(rows, null, _selectedYear);
     }
 
@@ -2069,11 +2069,11 @@
     function applyActivitySourceDropdowns() {
       const res = _sourceRef;
       if (!res || !res.success) return;
-      fillSelectOptions('act-group', res.groups || [], 'เลือกกลุ่มงาน');
-      fillSelectOptions('act-status', res.actStatuses || [], 'เลือกสถานะ');
-      fillSelectOptions('act-btype', res.budgetTypes || [], 'เลือกประเภทงบ');
-      fillSelectOptions('act-budget-code', res.budgetCodes || [], 'เลือกรหัสงบประมาณ');
-      fillSelectOptions('act-project', [], 'เลือกกลุ่มงานก่อน');
+      fillSelectOptions('ds6-act-group', res.groups || [], 'เลือกกลุ่มงาน');
+      fillSelectOptions('ds6-act-status', res.actStatuses || [], 'เลือกสถานะ');
+      fillSelectOptions('ds6-act-btype', res.budgetTypes || [], 'เลือกประเภทงบ');
+      fillSelectOptions('ds6-act-budget-code', res.budgetCodes || [], 'เลือกรหัสงบประมาณ');
+      fillSelectOptions('ds6-act-project', [], 'เลือกกลุ่มงานก่อน');
     }
 
     /**
@@ -2103,7 +2103,7 @@
 
     /** กรองรายการโครงการตามกลุ่มงานที่เลือก (dependent dropdown) */
     function refreshActivityProjectOptions() {
-      const group = (document.getElementById('act-group') && document.getElementById('act-group').value || '').trim();
+      const group = (document.getElementById('ds6-act-group') && document.getElementById('ds6-act-group').value || '').trim();
       const rows = (_sourceRef && _sourceRef.sourceRows) ? _sourceRef.sourceRows : [];
       let projects = [];
       if (group) {
@@ -2116,7 +2116,7 @@
         projects = Array.from(set).sort((a, b) => a.localeCompare(b, 'th'));
       }
       const ph = group ? 'เลือกโครงการ' : 'เลือกกลุ่มงานก่อน';
-      fillSelectOptions('act-project', projects, ph);
+      fillSelectOptions('ds6-act-project', projects, ph);
     }
 
     function onActivityGroupChange() {
@@ -2125,16 +2125,16 @@
 
     function onActivityProjectChange() {
       if (!_sourceRef || !_sourceRef.sourceRows) return;
-      const proj = (document.getElementById('act-project').value || '').trim();
+      const proj = (document.getElementById('ds6-act-project').value || '').trim();
       if (!proj) return;
-      const g = (document.getElementById('act-group').value || '').trim();
+      const g = (document.getElementById('ds6-act-group').value || '').trim();
       const list = _sourceRef.sourceRows || [];
       const row = list.find(x => (x.project || '').trim() === proj && (!g || (x.group || '').trim() === g))
         || list.find(x => (x.project || '').trim() === proj);
       if (!row) return;
-      if (row.actStatus) ensureSelectValue('act-status', row.actStatus);
-      if (row.budgetType) ensureSelectValue('act-btype', row.budgetType);
-      if (row.budgetCode) ensureSelectValue('act-budget-code', row.budgetCode);
+      if (row.actStatus) ensureSelectValue('ds6-act-status', row.actStatus);
+      if (row.budgetType) ensureSelectValue('ds6-act-btype', row.budgetType);
+      if (row.budgetCode) ensureSelectValue('ds6-act-budget-code', row.budgetCode);
     }
 
     function fillSelectOptions(id, options, placeholder) {
@@ -2164,7 +2164,7 @@
     }
 
     function loadActivities(page = _actPage) {
-      _actPageSize = parseInt(document.getElementById('act-page-size')?.value || _actPageSize || 20, 10);
+      _actPageSize = parseInt(document.getElementById('ds6-act-page-size')?.value || _actPageSize || 20, 10);
       _actPage = Math.max(1, page);
       google.script.run
         .withSuccessHandler(res => {
@@ -2174,7 +2174,7 @@
           _actTotalPages = res.totalPages || 1;
           const total = res.total || 0;
           renderActivities(_activities, total);
-          const meta = document.getElementById('act-meta');
+          const meta = document.getElementById('ds6-act-meta');
           const base = `ปีงบ ${_selectedYear} · ทั้งหมด ${total} รายการ`;
           if (meta) {
             if (total === 0) {
@@ -2183,7 +2183,7 @@
               meta.textContent = base;
             }
           }
-          document.getElementById('act-page-info').textContent =
+          document.getElementById('ds6-act-page-info').textContent =
             `หน้า ${_actPage}/${_actTotalPages}`;
         })
         .withFailureHandler(() => { })
@@ -2191,7 +2191,7 @@
     }
 
     function renderActivities(rows, totalForYear) {
-      const tbody = document.getElementById('act-tbody');
+      const tbody = document.getElementById('ds6-act-tbody');
       tbody.innerHTML = '';
       if (!rows || !rows.length) {
         const t = totalForYear === 0 || totalForYear === undefined;
@@ -2428,12 +2428,12 @@
     }
 
     function filterActivities() {
-      _actQuery = (document.getElementById('act-search').value || '').trim();
+      _actQuery = (document.getElementById('ds6-act-search').value || '').trim();
       loadActivities(1);
     }
 
     function changeActivityPageSize() {
-      _actPageSize = parseInt(document.getElementById('act-page-size').value || 20, 10);
+      _actPageSize = parseInt(document.getElementById('ds6-act-page-size').value || 20, 10);
       loadActivities(1);
     }
 
@@ -2445,47 +2445,47 @@
 
     function openDS6ActivityForm(activityId) {
       initActivitySourceOptions(() => {
-        _activityEditId = activityId || null;
+        _activityEditId = typeof activityId === 'string' ? activityId : null;
         const isEdit = !!_activityEditId;
         let d = isEdit ? (_activities.find(x => x.id === _activityEditId) || {}) : {};
         if (isEdit && (d.project || '').trim() && !(d.group || '').trim() && _sourceRef && _sourceRef.sourceRows) {
           const hit = (_sourceRef.sourceRows || []).find(x => (x.project || '').trim() === (d.project || '').trim());
           if (hit && hit.group) d = { ...d, group: hit.group };
         }
-        document.getElementById('act-form-title').textContent = isEdit ? 'แก้ไขรายการกันเงิน' : 'เพิ่มรายการกันเงิน';
+        document.getElementById('ds6-act-form-title').textContent = isEdit ? 'แก้ไขรายการกันเงิน' : 'เพิ่มรายการกันเงิน';
         // วันที่: แก้ไข = ใช้ค่าเดิม / เพิ่มใหม่ = วันนี้
         const todayStr = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD
-        document.getElementById('act-date').value = d.date || todayStr;
-        ensureSelectValue('act-group', d.group || '');
+        document.getElementById('ds6-act-date').value = d.date || todayStr;
+        ensureSelectValue('ds6-act-group', d.group || '');
         refreshActivityProjectOptions();
-        ensureSelectValue('act-project', d.project || '');
-        document.getElementById('act-name').value = d.activity || '';
-        document.getElementById('act-budget').value = d.budget != null ? d.budget : '';
-        document.getElementById('act-paid').value = d.paid != null ? d.paid : 0;
-        ensureSelectValue('act-status', d.status || 'กันเงิน'); // default = กันเงิน
-        ensureSelectValue('act-btype', d.btype || '');
-        ensureSelectValue('act-budget-code', d.budgetCode || '');
-        document.getElementById('act-person').value   = d.person   || '';
-        document.getElementById('act-duration').value = d.duration || '';
+        ensureSelectValue('ds6-act-project', d.project || '');
+        document.getElementById('ds6-act-name').value = d.activity || '';
+        document.getElementById('ds6-act-budget').value = d.budget != null ? d.budget : '';
+        document.getElementById('ds6-act-paid').value = d.paid != null ? d.paid : 0;
+        ensureSelectValue('ds6-act-status', d.status || 'กันเงิน'); // default = กันเงิน
+        ensureSelectValue('ds6-act-btype', d.btype || '');
+        ensureSelectValue('ds6-act-budget-code', d.budgetCode || '');
+        document.getElementById('ds6-act-person').value   = d.person   || '';
+        document.getElementById('ds6-act-duration').value = d.duration || '';
         document.getElementById('modal-ds6-activity-form').style.display = 'flex';
       });
     }
 
     function saveDS6ActivityForm() {
-      const budget = parseFloat(document.getElementById('act-budget').value || 0);
-      const paid = parseFloat(document.getElementById('act-paid').value || 0);
+      const budget = parseFloat(document.getElementById('ds6-act-budget').value || 0);
+      const paid = parseFloat(document.getElementById('ds6-act-paid').value || 0);
       const payload = {
-        date: document.getElementById('act-date').value,
-        group: document.getElementById('act-group').value,
-        project: document.getElementById('act-project').value,
-        activity: document.getElementById('act-name').value,
+        date: document.getElementById('ds6-act-date').value,
+        group: document.getElementById('ds6-act-group').value,
+        project: document.getElementById('ds6-act-project').value,
+        activity: document.getElementById('ds6-act-name').value,
         budget,
         paid,
-        status: document.getElementById('act-status').value,
-        btype: document.getElementById('act-btype').value,
-        budgetCode: document.getElementById('act-budget-code').value,
-        person:   (document.getElementById('act-person').value   || '').trim(),
-        duration: (document.getElementById('act-duration').value || '').trim(),
+        status: document.getElementById('ds6-act-status').value,
+        btype: document.getElementById('ds6-act-btype').value,
+        budgetCode: document.getElementById('ds6-act-budget-code').value,
+        person:   (document.getElementById('ds6-act-person').value   || '').trim(),
+        duration: (document.getElementById('ds6-act-duration').value || '').trim(),
       };
       if (!payload.activity) { showError('กรุณาระบุชื่อกิจกรรม'); return; }
       if (isNaN(budget)) { showError('กรุณาระบุงบประมาณ'); return; }
