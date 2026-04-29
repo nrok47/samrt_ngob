@@ -104,7 +104,7 @@
       const _setAttr = (id, attr, val) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, val); };
 
       _set('last-update', s.lastUpdate);
-      _set('fiscal-year-label', '2569');
+      _set('fiscal-year-label', String(_selectedYear));
 
       // KPIs
       _set('kpi-allocated', fmt(s.allocated));
@@ -2121,6 +2121,13 @@
 
     function onActivityGroupChange() {
       refreshActivityProjectOptions();
+      const group = (document.getElementById('ds6-act-group').value || '').trim();
+      const el = document.getElementById('ds6-act-admin-line');
+      if (!el) return;
+      if (!group || !_sourceRef || !_sourceRef.sourceRows) { el.placeholder = 'เลือกกลุ่มงานก่อน'; el.value = ''; return; }
+      const hit = _sourceRef.sourceRows.find(x => x.group && (group.includes(x.group) || x.group === group));
+      el.value = (hit && hit.adminLine) ? hit.adminLine : '';
+      el.placeholder = (hit && hit.adminLine) ? '' : 'ไม่พบการเชื่อมโยง — ระบุเอง';
     }
 
     function onActivityProjectChange() {
@@ -2467,6 +2474,15 @@
         ensureSelectValue('ds6-act-budget-code', d.budgetCode || '');
         document.getElementById('ds6-act-person').value   = d.person   || '';
         document.getElementById('ds6-act-duration').value = d.duration || '';
+        // populate adminLine: ใช้ค่าเดิม (edit) หรือ auto-lookup จาก group (new)
+        const adminLineEl = document.getElementById('ds6-act-admin-line');
+        if (adminLineEl) {
+          if (d.adminLine) {
+            adminLineEl.value = d.adminLine;
+          } else {
+            onActivityGroupChange();
+          }
+        }
         document.getElementById('modal-ds6-activity-form').style.display = 'flex';
       });
     }
@@ -2484,9 +2500,12 @@
         status: document.getElementById('ds6-act-status').value,
         btype: document.getElementById('ds6-act-btype').value,
         budgetCode: document.getElementById('ds6-act-budget-code').value,
-        person:   (document.getElementById('ds6-act-person').value   || '').trim(),
-        duration: (document.getElementById('ds6-act-duration').value || '').trim(),
+        person:    (document.getElementById('ds6-act-person').value     || '').trim(),
+        duration:  (document.getElementById('ds6-act-duration').value   || '').trim(),
+        adminLine: (document.getElementById('ds6-act-admin-line').value || '').trim(),
       };
+      if (!payload.date)     { showError('กรุณาระบุวันที่'); return; }
+      if (!payload.group)    { showError('กรุณาเลือกกลุ่มงาน'); return; }
       if (!payload.activity) { showError('กรุณาระบุชื่อกิจกรรม'); return; }
       if (isNaN(budget)) { showError('กรุณาระบุงบประมาณ'); return; }
       if (isNaN(paid))   { showError('กรุณาระบุยอดเบิกจ่าย'); return; }
