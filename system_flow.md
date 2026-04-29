@@ -35,6 +35,8 @@
 - เพิ่ม/แก้ไข/ลบ: `createActivity`, `updateActivity`, `deleteActivity`
 - นำเข้าแบบวางข้อความ: `importActivities`
 - ทุกการเปลี่ยนจะ sync ผลไป `DS5_AdminAlloc` ผ่าน `_syncActivitiesToDS5`
+- ฟอร์มเพิ่ม/แก้ไข: กรอก วันที่, กลุ่มงาน, สายบริหาร (auto-fill จาก `source` sheet), โครงการ, กิจกรรม, งบประมาณ, เบิกจ่าย, สถานะ, ประเภทงบ, รหัสงบประมาณ, ผู้รับผิดชอบ, ระยะเวลา
+- `Admin_Line` auto-fill จาก `source` sheet เมื่อเลือกกลุ่มงาน — แก้ไขได้ถ้า mapping ไม่ตรง (สำคัญ: ค่านี้ขับ DS5 โดยตรง)
 
 ## `tab-admin` % เบิกจ่ายตามสายบริหาร
 - แสดงสรุปสายบริหารจาก `DS5_AdminAlloc`
@@ -95,6 +97,9 @@
 - สมุดกันเงิน/กิจกรรมรายวัน (CRUD + soft delete)
 - เป็นฐาน “ยอดเบิกจ่ายเชิงปฏิบัติการ” ในหลายหน้า
 - มีคอลัมน์ soft delete: `Is_Deleted`, `Deleted_At`, `Deleted_By`, `Delete_Reason`
+- คอลัมน์สำคัญ: `Admin_Line` (col 3) — ระบบ auto-map จาก `source` sheet (col A = adminLine, col E = group); ถ้า map ไม่เจอ fallback เป็น `ไม่ระบุ`; ค่านี้ขับยอดรวมใน DS5
+- `Wallet_Type` (col 16) — auto-infer จาก `BTYPE` ผ่าน `_inferDS6Wtype()`
+- `DS8_Projects` / `DS9_Activities` — โมดูลแผนงานโครงการ (กำลังพัฒนา)
 
 ## `DS7_Transfers`
 - ประวัติรอบโอนจากกรมแบบไม่จำกัดจำนวนรอบ
@@ -104,6 +109,15 @@
 ## `source`
 - master dropdown/reference data (กลุ่มงาน, pool, wallet type, สถานะ, รหัสงบ ฯลฯ)
 - ใช้เติมตัวเลือกในฟอร์มฝั่งเว็บ
+- col A = `Admin_Line`, col E = `กลุ่มงาน` — ใช้ mapping group→adminLine ใน DS6 และ tab-plan
+
+## `DS8_Projects` (โมดูลแผนงานโครงการ — กำลังพัฒนา)
+- เก็บโครงการรายปีงบ (ชื่อ, สายบริหาร, กลุ่มงาน, ประเภทงบ, งบประมาณ, งบรายเดือน M0–M11)
+- ใช้แสดง Gantt chart และ KPI รายโครงการใน `tab-plan`
+
+## `DS9_Activities` (กิจกรรมภายในโครงการ — กำลังพัฒนา)
+- เก็บกิจกรรมย่อยภายในโครงการ DS8 (เดือน, งบ, สถานะ, เหตุผลเลื่อน)
+- ใช้แสดงรายละเอียด drill-down ใน `tab-plan`
 
 ---
 
@@ -124,8 +138,10 @@
 
 ## Flow C: กันเงิน/กิจกรรม
 1. CRUD ที่ `tab-activities` เขียน `DS6_Activities`
-2. ทุกครั้งที่แก้ จะ sync สะท้อนยอดไป `DS5_AdminAlloc`
-3. Dashboard และ admin summary ดึงผลรวมจาก DS6/DS5
+2. ฟอร์มบันทึก: เลือกกลุ่มงาน → `Admin_Line` auto-fill จาก `source` sheet (แก้ได้) → ส่ง payload พร้อม `adminLine` ไป backend
+3. backend `createActivity` / `updateActivity` ใช้ `p.adminLine` ถ้ามี มิฉะนั้น re-map จาก `_defaultAdminLineMap()`
+4. ทุกครั้งที่แก้ จะ sync สะท้อนยอดไป `DS5_AdminAlloc` ผ่าน `_syncActivitiesToDS5`
+5. Dashboard และ admin summary ดึงผลรวมจาก DS6/DS5
 
 ## Flow D: บริหารรอบโอน (CRUD รอบ)
 1. สร้างรอบ: `processTransferRound` -> `DS7`
@@ -149,4 +165,6 @@
 - การนำเข้ารอบโอนควรใส่วันที่รอบก่อนยืนยัน เพื่อให้ trace ลง `DS7` ชัดเจน
 - ถ้าต้องแก้/ลบรอบโอน ให้ทำผ่าน CRUD ของแท็บ `รอบโอนงบ` เพื่อให้ `DS2` sync ตามอัตโนมัติ
 - การแก้ข้อมูลตรงในชีทโดยไม่ผ่านฟังก์ชัน อาจทำให้ยอดข้ามชีทไม่สอดคล้องกัน
+- `Admin_Line` ใน DS6 คือตัวขับยอด DS5 — ถ้า auto-fill ผิด ให้แก้ที่ `source` sheet (col A + col E) แล้ว recalculate DS5
+- mapping group→adminLine ดึงจาก `source` sheet ทุกครั้ง (ไม่ hardcode) — แก้ได้โดยไม่ต้อง deploy ใหม่
 
