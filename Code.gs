@@ -2287,14 +2287,18 @@ function _bootstrapActivitiesFromTransactions(fiscalYear) {
   return appendRows.length;
 }
 
-// ─── ตรวจงบ 2 ชั้น: (1) วงเงินกิจกรรมใน DS6  (2) คงเหลือหมวดรายจ่ายใน DS2 ────
+// ─── ตรวจงบ 2 ชั้น ─────────────────────────────────────────────────────────
+// ชั้น 1 (activityId ≠ null): วงเงินคงเหลือของกิจกรรมนั้นใน DS6
+//   → ใช้สำหรับ "กันเงินเพิ่มในกิจกรรมเดิม" ไม่ใช้ตอน createActivity
+// ชั้น 2 (budgetCode ≠ ''): Remaining ใน DS2_MasterBudget
+//   → ใช้ทุกครั้งที่มี budgetCode
 function _checkBudget2Layer(activityId, budgetCode, requestAmount, fiscalYear) {
   const fy     = fiscalYear ? Number(fiscalYear) : CONFIG.FISCAL_YEAR;
   const amount = _n(requestAmount);
   if (amount <= 0) return { ok: true };
   const ss = _ss();
 
-  // ชั้น 1 — วงเงินกิจกรรม (DS6)
+  // ชั้น 1 — วงเงินกิจกรรม (DS6) — ข้ามถ้าไม่มี activityId
   if (activityId) {
     const ds6 = ss.getSheetByName('DS6_Activities').getDataRange().getValues();
     for (let i = 1; i < ds6.length; i++) {
@@ -2312,15 +2316,20 @@ function _checkBudget2Layer(activityId, budgetCode, requestAmount, fiscalYear) {
   if (budgetCode) {
     const normCode = _normCode(budgetCode);
     const ds2 = ss.getSheetByName('DS2_MasterBudget').getDataRange().getValues();
+    let found = false;
     for (let i = 1; i < ds2.length; i++) {
       if (_normCode(String(ds2[i][C2.CODE]||'')) !== normCode) continue;
       if (Number(ds2[i][C2.FISCAL_YEAR]) !== fy) continue;
+      found = true;
       const budgetRemain = _n(ds2[i][C2.REMAIN]);
       if (budgetRemain < amount)
         return { ok:false, layer:2,
           message:`งบหมวดรายจ่ายไม่พอ — รหัส ${budgetCode} คงเหลือ ฿${budgetRemain.toLocaleString()} ต้องการ ฿${amount.toLocaleString()}` };
       break;
     }
+    if (!found)
+      return { ok:false, layer:2,
+        message:`ไม่พบรหัสงบประมาณ ${budgetCode} ในปีงบ ${fy} — กรุณาตรวจสอบ MasterBudget` };
   }
 
   return { ok: true };
@@ -2449,6 +2458,14 @@ function updateActivity(activityId, payload, fiscalYear) {
       const _oldBudget = _n(data[i][5]);
       const _oldPaid   = _n(data[i][6]);
       const _oldStatus = String(data[i][7] || '');
+      // ตรวจ DS2 ถ้างบเพิ่มขึ้น (Layer 2 เท่านั้น — Layer 1 ไม่ใช้เพราะ activity นี้คือตัวถูกแก้)
+      if (v.budget > _oldBudget) {
+        const increase = v.budget - _oldBudget;
+        const bc = String(p.budgetCode ?? data[i][C6.BUDGET_CODE] ?? '').trim();
+        const checkFy = _fiscalYearFromDateValue(_toYmd(p.date || data[i][1])) || CONFIG.FISCAL_YEAR;
+        const check = _checkBudget2Layer(null, bc, increase, checkFy);
+        if (!check.ok) return { success:false, message:check.message };
+      }
       const newRow = [
         data[i][0],
         dateStr,
