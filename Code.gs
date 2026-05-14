@@ -2287,7 +2287,9 @@ function _bootstrapActivitiesFromTransactions(fiscalYear) {
 }
 
 function createActivity(payload, fiscalYear) {
+  const lock = LockService.getScriptLock();
   try {
+    lock.waitLock(10000);
     const p = payload || {};
     const v = _validateActivityPayload(p);
     if (!v.success) return v;
@@ -2324,11 +2326,15 @@ function createActivity(payload, fiscalYear) {
     return { success:true, id:actId };
   } catch (e) {
     return { success:false, message:e.message };
+  } finally {
+    try { lock.releaseLock(); } catch(_) {}
   }
 }
 
 function updateActivity(activityId, payload, fiscalYear) {
+  const lock = LockService.getScriptLock();
   try {
+    lock.waitLock(10000);
     const p = payload || {};
     const v = _validateActivityPayload(p);
     if (!v.success) return v;
@@ -2348,6 +2354,9 @@ function updateActivity(activityId, payload, fiscalYear) {
       const updatedBtype = String(p.btype ?? data[i][C6.BTYPE] ?? '').trim();
       const updatedWtype = String(p.wtype ?? data[i][C6.WTYPE] ?? '').trim()
                            || _inferDS6Wtype(updatedBtype);
+      const _oldBudget = _n(data[i][5]);
+      const _oldPaid   = _n(data[i][6]);
+      const _oldStatus = String(data[i][7] || '');
       const newRow = [
         data[i][0],
         dateStr,
@@ -2373,12 +2382,14 @@ function updateActivity(activityId, payload, fiscalYear) {
       if (oldFy) _syncActivitiesToDS5(oldFy);
       if (newFy && newFy !== oldFy) _syncActivitiesToDS5(newFy);
       if (fy && fy !== oldFy && fy !== newFy) _syncActivitiesToDS5(fy);
-      _log('DS6','UPDATE',`${activityId} ${newRow[4]}`);
+      _log('DS6','UPDATE',`${activityId} ${newRow[4]} | prev budget=${_oldBudget} paid=${_oldPaid} status=${_oldStatus} -> budget=${v.budget} paid=${v.paid} status=${newRow[7]}`);
       return { success:true };
     }
     return { success:false, message:'ไม่พบรายการกิจกรรม' };
   } catch (e) {
     return { success:false, message:e.message };
+  } finally {
+    try { lock.releaseLock(); } catch(_) {}
   }
 }
 
@@ -2549,7 +2560,9 @@ function quickUpdateActivityStatus(activityId, newStatus, fiscalYear) {
 }
 
 function deleteActivity(activityId, fiscalYear, reason) {
+  const lock = LockService.getScriptLock();
   try {
+    lock.waitLock(10000);
     const ss  = _ss();
     const ds6 = ss.getSheetByName('DS6_Activities');
     _ensureDs6Schema(ds6);
@@ -2557,7 +2570,11 @@ function deleteActivity(activityId, fiscalYear, reason) {
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][0]) !== String(activityId)) continue;
       if (_isTrue(data[i][C6.IS_DELETED])) return { success:true };
-      const oldFy = _fiscalYearFromDateValue(data[i][1]);
+      const oldFy      = _fiscalYearFromDateValue(data[i][1]);
+      const _oldBudget = _n(data[i][5]);
+      const _oldPaid   = _n(data[i][6]);
+      const _oldStatus = String(data[i][7] || '');
+      const _actName   = String(data[i][4] || '');
       ds6.getRange(i+1, C6.IS_DELETED+1, 1, 4).setValues([[
         'TRUE',
         _now(),
@@ -2566,12 +2583,47 @@ function deleteActivity(activityId, fiscalYear, reason) {
       ]]);
       if (oldFy) _syncActivitiesToDS5(oldFy);
       if (fiscalYear && Number(fiscalYear) !== oldFy) _syncActivitiesToDS5(Number(fiscalYear));
-      _log('DS6','SOFT_DELETE',`${activityId} ${reason||''}`);
+      _log('DS6','SOFT_DELETE',`${activityId} ${_actName} | budget=${_oldBudget} paid=${_oldPaid} prevStatus=${_oldStatus} | reason=${reason||''}`);
       return { success:true };
     }
     return { success:false, message:'ไม่พบรายการกิจกรรม' };
   } catch (e) {
     return { success:false, message:e.message };
+  } finally {
+    try { lock.releaseLock(); } catch(_) {}
+  }
+}
+
+function settleActivity(activityId, actualPaid, fiscalYear, note) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const ss  = _ss();
+    const ds6 = ss.getSheetByName('DS6_Activities');
+    _ensureDs6Schema(ds6);
+    const data = ds6.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) !== String(activityId)) continue;
+      if (_isTrue(data[i][C6.IS_DELETED])) return { success:false, message:'รายการนี้ถูกลบแล้ว' };
+      const prevStatus = String(data[i][7] || '');
+      if (prevStatus === 'เบิกจ่ายแล้ว') return { success:false, message:'ล้างหนี้ไปแล้ว' };
+      const reserved  = _n(data[i][5]);
+      const prevPaid  = _n(data[i][6]);
+      const finalPaid = _n(actualPaid);
+      const leftover  = _r(Math.max(0, reserved - finalPaid));
+      ds6.getRange(i+1, 7).setValue(finalPaid);
+      ds6.getRange(i+1, 8).setValue('เบิกจ่ายแล้ว');
+      const fy = fiscalYear ? Number(fiscalYear) : _fiscalYearFromDateValue(data[i][1]);
+      _syncActivitiesToDS5(fy);
+      _log('DS6','SETTLE',`${activityId} ${data[i][4]} | reserved=${reserved} prevPaid=${prevPaid} actualPaid=${finalPaid} leftover=${leftover}${note ? ' note='+note : ''}`);
+      return { success:true, activityId, reserved, actualPaid:finalPaid, leftover,
+               message:`ล้างหนี้สำเร็จ | ใช้จริง ฿${finalPaid.toLocaleString()} เงินคืน ฿${leftover.toLocaleString()}` };
+    }
+    return { success:false, message:'ไม่พบรายการกิจกรรม' };
+  } catch (e) {
+    return { success:false, message:e.message };
+  } finally {
+    try { lock.releaseLock(); } catch(_) {}
   }
 }
 
@@ -4019,8 +4071,10 @@ function getGFInputRows(fiscalYear) {
 }
 
 function saveGFInput(updates) {
-  const t0 = Date.now();
+  const t0   = Date.now();
+  const lock = LockService.getScriptLock();
   try {
+    lock.waitLock(10000);
     if (!updates || !updates.length) return { success: false, message: 'ไม่มีข้อมูล' };
 
     let gfSh = null;
@@ -4081,6 +4135,8 @@ function saveGFInput(updates) {
   } catch (e) {
     _log('GF_INPUT', 'SAVE_ERROR', e.message, 0, Date.now() - t0, 'ERROR');
     return { success: false, message: e.message };
+  } finally {
+    try { lock.releaseLock(); } catch(_) {}
   }
 }
 
