@@ -900,4 +900,70 @@
         font-size: 17px;
       }
     }
+
+    /* ════════════════════════════════════════════
+       DASHBOARD V2 — Pastel Design (ภาพรวมผู้บริหาร)
+    ════════════════════════════════════════════ */
+    .dv2-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+    .dv2-card { background: #fff; border: 1px solid #ecdfe8; padding: 18px 20px; border-radius: 14px; position: relative; box-shadow: 0 1px 2px rgba(155,143,168,.06); }
+
+    /* Hero card */
+    .dv2-hero { grid-column: span 5; background: linear-gradient(135deg, #a4c8ec 0%, #f6c1d4 50%, #f9d9a8 100%); border: none !important; padding: 22px 24px; }
+    .dv2-hero h3 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .14em; color: rgba(58,54,84,.65); font-weight: 500; }
+    .dv2-big { font-size: 64px; font-weight: 600; letter-spacing: -.03em; line-height: 1; margin: 10px 0 4px; font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; color: #3a3654; }
+    .dv2-sub { font-size: 12px; color: rgba(58,54,84,.75); font-family: 'IBM Plex Mono', monospace; }
+    .dv2-target-track { position: relative; height: 14px; background: rgba(255,255,255,.55); margin-top: 22px; border-radius: 999px; overflow: visible; }
+    .dv2-target-track i { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(255,255,255,.85); transition: width .8s ease; border-radius: 999px; }
+    .dv2-target-marker { position: absolute; top: -6px; bottom: -6px; width: 2px; background: #3a3654; opacity: .6; }
+    .dv2-marker-lbl { position: absolute; top: -22px; transform: translateX(-50%); font-size: 10px; font-family: 'IBM Plex Mono', monospace; white-space: nowrap; padding: 2px 8px; background: #fff; color: #3a3654; border-radius: 999px; box-shadow: 0 1px 2px rgba(58,54,84,.12); }
+    .dv2-target-marker.dv2-fail-marker .dv2-marker-lbl { background: #ef9a8a; color: #fff; }
+    .dv2-target-axis { display: flex; justify-content: space-between; font-size: 10px; font-family: 'IBM Plex Mono', monospace; opacity: .65; margin-top: 8px; color: #3a3654; }
+    .dv2-hero-status { display: flex; gap: 10px; margin-top: 18px; }
+    .dv2-status-pill { flex: 1; padding: 10px 14px; background: rgba(255,255,255,.55); border-radius: 12px; font-size: 12px; }
+    .dv2-status-pill.dv2-pass { background: rgba(168,216,160,.65); }
+    .dv2-status-pill.dv2-fail { background: rgba(239,154,138,.5); }
+    .dv2-pill-lbl { font-size: 10px; opacity: .7; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 2px; color: #3a3654; }
+    .dv2-pill-v { display: flex; align-items: center; gap: 6px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; color: #3a3654; font-size: 12px; }
+
+    /* KPI strip */
+    .dv2-kpi { grid-column: span 7; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; padding: 0; overflow: hidden; }
+    .dv2-kpi-cell { padding: 18px 22px; border-right: 1px solid #ecdfe8; display: flex; flex-direction: column; }
+    .dv2-kpi-cell:last-child { border-right: none; }
+    .dv2-kpi-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .14em; color: #9b8fa8; font-weight: 500; }
+    .dv2-kpi-v { font-size: 28px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; letter-spacing: -.02em; margin-top: 6px; line-height: 1.05; color: #3a3654; }
+    .dv2-kpi-d { font-size: 11px; font-family: 'IBM Plex Mono', monospace; color: #9b8fa8; margin-top: 4px; }
+    .dv2-badge-row { margin-top: auto; padding-top: 10px; }
+    .dv2-new-badge { display: inline-block; padding: 2px 8px; background: #e8f5f1; color: #7cc5b7; font-size: 11px; border-radius: 999px; font-family: 'IBM Plex Mono', monospace; }
+    .dv2-new-badge.dv2-pass { background: #e8f5f1; color: #7cc5b7; }
+    .dv2-new-badge.dv2-warn { background: #fdf0e3; color: #b87a1f; }
+    .dv2-new-badge.dv2-fail { background: #fdf0eb; color: #d96a4a; }
+    .dv2-new-badge.dv2-muted { background: #fbf4f7; color: #9b8fa8; }
+
+    /* RAYSAI bars */
+    .dv2-raysai { grid-column: 1 / -1; }
+    .dv2-raysai-bars { display: grid; gap: 10px; align-items: end; height: 220px; padding: 12px 0 6px; border-bottom: 1px solid #f5ecf2; position: relative; }
+    .dv2-raysai-wrap { position: relative; }
+    .dv2-raysai-foot { display: flex; gap: 22px; margin-top: 14px; flex-wrap: wrap; font-size: 11px; color: #9b8fa8; }
+    .dv2-raysai-foot span { display: inline-flex; align-items: center; gap: 6px; font-family: 'IBM Plex Mono', monospace; }
+    .dv2-sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+    .dv2-raybar { display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; }
+    .dv2-raybar .dv2-pct { font-size: 11px; font-family: 'IBM Plex Mono', monospace; font-weight: 600; color: #3a3654; }
+    .dv2-raybar .dv2-b { width: 100%; max-width: 56px; background: #a4c8ec; border-radius: 8px 8px 0 0; transition: height .7s ease; min-height: 2px; }
+    .dv2-raybar.dv2-pass-both .dv2-b { background: #a8d8a0; }
+    .dv2-raybar.dv2-pass-grm .dv2-b { background: #a4c8ec; }
+    .dv2-raybar.dv2-fail-both .dv2-b { background: #ef9a8a; }
+    .dv2-raybar .dv2-lbl { font-size: 10px; line-height: 1.15; color: #9b8fa8; text-align: center; height: 32px; overflow: hidden; }
+
+    /* Section header */
+    .dv2-sec-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 12px; }
+    .dv2-sec-head h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #3a3654; }
+    .dv2-badge { display: inline-block; margin-right: 8px; width: 24px; height: 24px; background: #7cc5b7; color: #3a3654; border-radius: 8px; text-align: center; line-height: 24px; font-size: 11px; font-family: 'IBM Plex Mono', monospace; vertical-align: middle; font-weight: 600; }
+    .dv2-meta { font-size: 11px; color: #9b8fa8; font-family: 'IBM Plex Mono', monospace; }
+
+    @media (max-width: 1100px) {
+      .dv2-hero { grid-column: 1 / -1; }
+      .dv2-kpi { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; }
+      .dv2-kpi-cell:nth-child(2) { border-right: none; }
+      .dv2-kpi-cell:last-child { border-top: 1px solid #ecdfe8; grid-column: 1 / -1; }
+    }
   </style>

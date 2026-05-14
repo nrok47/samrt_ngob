@@ -1,170 +1,157 @@
-# สรุประบบ: โมดูลหน้าเว็บ + โครงสร้างการเก็บข้อมูลใน Google Sheet
+# Smart NGOB — System Flow
 
-เอกสารนี้สรุปการทำงานของแต่ละหน้าใน `index.html` และความสัมพันธ์กับชีทข้อมูลใน `code.gs` เพื่อใช้เป็นคู่มือดูแลระบบ/ส่งต่องาน
-
----
-
-## 1) โครงสร้างโมดูลหน้าเว็บ (UI Tabs)
-
-## `tab-dashboard` ภาพรวมผู้บริหาร
-- แสดง KPI หลัก: งบจัดสรร, เบิกจ่าย, PO, คงเหลือ, ความต่างเทียบ GFMIS
-- อ่านข้อมูลผ่าน `getDashboardData(fiscalYear)`
-- ใช้ข้อมูลรวมจาก `DS2_MasterBudget` + `DS6_Activities` + `DS5_AdminAlloc` + `DS3_Targets`
-
-## `tab-group` รายละเอียดตามกลุ่มงาน
-- แสดงสรุปตามกลุ่มงานจากข้อมูลกันเงิน/กิจกรรม
-- ใช้ข้อมูล `groupSummary` ที่สร้างจาก `DS6_Activities`
-
-## `tab-detail` รายละเอียดรายรหัสงบ
-- ตารางรายรหัสงบ (แผนงาน/รหัส/จัดสรร/เบิก/PO/คงเหลือ)
-- ข้อมูลจาก `tableRows` ใน `getDashboardData` (ฐานจาก `DS2_MasterBudget`)
-
-## `tab-import` นำเข้าข้อมูล GFMIS
-- Step 1: วางข้อมูลจาก GFMIS แล้วตรวจ (`parsePaste -> stagingImport`)
-- Step 2: ยืนยันนำเข้า (`confirmImport`)
-- Step 3: ตั้งยอดยกมา (`setInitialBalance`)
-- ถ้ามี `transferDate` จะบันทึกรายการโอนเข้า `DS7_Transfers` ด้วย
-
-## `tab-gfinput` อัปเดต GFMIS รายวัน
-- โหลดรายการจาก `getGFInputRows`
-- บันทึก PO/เบิกวันนี้ผ่าน `saveGFInput`
-- อัปเดตกลับเข้า `DS2_MasterBudget` ทันที
-
-## `tab-activities` สมุดกันเงินรายวัน (CRUD)
-- อ่านรายการ: `listActivities`
-- เพิ่ม/แก้ไข/ลบ: `createActivity`, `updateActivity`, `deleteActivity`
-- นำเข้าแบบวางข้อความ: `importActivities`
-- ทุกการเปลี่ยนจะ sync ผลไป `DS5_AdminAlloc` ผ่าน `_syncActivitiesToDS5`
-- ฟอร์มเพิ่ม/แก้ไข: กรอก วันที่, กลุ่มงาน, สายบริหาร (auto-fill จาก `source` sheet), โครงการ, กิจกรรม, งบประมาณ, เบิกจ่าย, สถานะ, ประเภทงบ, รหัสงบประมาณ, ผู้รับผิดชอบ, ระยะเวลา
-- `Admin_Line` auto-fill จาก `source` sheet เมื่อเลือกกลุ่มงาน — แก้ไขได้ถ้า mapping ไม่ตรง (สำคัญ: ค่านี้ขับ DS5 โดยตรง)
-
-## `tab-admin` % เบิกจ่ายตามสายบริหาร
-- แสดงสรุปสายบริหารจาก `DS5_AdminAlloc`
-- รองรับ override ผ่าน `overrideAdminAlloc` / `resetAdminAllocOverride`
-- ปุ่ม Recalculate เรียก `manualRecalcAdminAlloc`
-
-## `tab-transfer` รอบการโอนงบประมาณ (CRUD รอบโอน)
-- แสดงรอบโอนแบบไม่จำกัดจำนวนรอบจาก `DS7_Transfers` (ไม่ล็อกแค่ R1-R3)
-- Create รอบใหม่: `processTransferRound`
-- Read ประวัติรอบ: `listTransferRounds` / `getTransferHistory`
-- Update metadata รอบ: `updateTransferRoundMeta`
-- Delete รอบ: `deleteTransferRound` (พร้อม sync ย้อนกลับเข้า `DS2_MasterBudget` โดย `_syncMasterAllocFromDS7`)
-
-## `tab-exec` สรุปผู้บริหาร (Executive Dashboard)
-- KPI/แนวโน้มเดือน/สัดส่วน pool/กลุ่มงาน
-- ใช้ข้อมูลจาก `getDashboardData` ชุดเดียวกับ dashboard หลัก แต่ render มุมผู้บริหาร
-
-## `tab-logs` ประวัติการใช้งาน
-- ดึงจาก `getRecentLogs`
-- แหล่งข้อมูลคือ `DS4_Logs`
+ระบบติดตามกำกับงบประมาณ ศูนย์อนามัยที่ 10 | Google Apps Script + Sheets
 
 ---
 
-## 2) โครงสร้างชีทข้อมูล (Data Sheets)
+## 1) Tab Modules (UI)
 
-## `DS0_Staging`
-- พื้นที่พักข้อมูลที่ผู้ใช้ paste จาก GFMIS ก่อนยืนยันนำเข้า
-- ถูกเขียนโดย `stagingImport`
-- ถูกอ่านโดย `confirmImport`
-- หลังยืนยันจะเปลี่ยนสถานะเป็น “นำเข้าแล้ว …”
+| Tab | ชื่อแสดง | ฟังก์ชัน GAS หลัก | Sheet ที่ใช้ |
+|-----|---------|-----------------|------------|
+| dashboard | ภาพรวมผู้บริหาร | `getDashboardData` | DS2, DS5, DS6, DS3 |
+| group | รายกลุ่มงาน | `getDashboardData` (groupSummary) | DS6 |
+| detail | รายรหัสงบ | `getDashboardData` (tableRows) | DS2 |
+| gfinput | อัปเดต GFMIS รายวัน | `getGFInputRows`, `saveGFInput` | DS2 |
+| activities | กันเงินรายวัน | `listActivities`, `createActivity`, `updateActivity`, `deleteActivity` | DS6, DS5 |
+| admin | % เบิกสายบริหาร | `manualRecalcAdminAlloc`, `overrideAdminAlloc` | DS5 |
+| transfer | รอบโอนงบ | `listTransferRounds`, `processTransferRound`, `updateTransferRoundMeta`, `deleteTransferRound` | DS7, DS2 |
+| exec | สรุปผู้บริหาร | `getDashboardData` | DS2, DS5, DS6, DS3 |
+| logs | ประวัติการใช้งาน | `getRecentLogs` | DS4 |
+| plan | แผนงานโครงการ | `getProjects`, `saveProject` | DS8, DS9 (dev) |
+| **reports** | **รายงาน** | `getDashboardData` | DS2, DS3, DS5, DS6 |
 
-## `DS1_Transactions`
-- เก็บธุรกรรมการอัปเดตงบ/เบิก/PO ทุกครั้ง (audit เชิงธุรกรรม)
-- เขียนโดย `confirmImport` และบาง flow ของ `saveGFInput`
-- ใช้สำหรับ bootstrap กิจกรรมบางกรณี (`_bootstrapActivitiesFromTransactions`)
-
-## `DS2_MasterBudget` (แกนหลัก)
-- master รายรหัสงบแต่ละปีงบ
-- ฟิลด์สำคัญ: `Wallet_Type`, `Alloc_R1..R3`, `Alloc_Total`, `PO_Now`, `Paid_Now`, `Remaining`, `Fiscal_Year`
-- ใช้เป็นฐาน dashboard หลักและรายละเอียดรายรหัส
-- หมายเหตุ: ระบบรองรับรอบโอนไม่จำกัดผ่าน `DS7`; ส่วน `R1..R3` ใช้เพื่อความเข้ากันได้ย้อนหลัง/มุมมองรวม
-
-## `DS3_Targets`
-- เป้าหมายการเบิกจ่ายรายเดือน/สะสม (%)
-- ใช้ใน dashboard และ executive trend
-
-## `DS4_Logs`
-- audit log ของระบบ (module/action/detail/status/duration)
-- เขียนผ่าน helper `_log`
-
-## `DS5_AdminAlloc`
-- ตารางจัดสรรตามสายบริหาร/Pool
-- สร้างและคำนวณโดย `_recalcAdminAlloc`
-- ยอดเบิกฝั่งสายบริหาร sync จาก `DS6_Activities` ผ่าน `_syncActivitiesToDS5`
-- รองรับการ override รายแถว
-
-## `DS6_Activities`
-- สมุดกันเงิน/กิจกรรมรายวัน (CRUD + soft delete)
-- เป็นฐาน “ยอดเบิกจ่ายเชิงปฏิบัติการ” ในหลายหน้า
-- มีคอลัมน์ soft delete: `Is_Deleted`, `Deleted_At`, `Deleted_By`, `Delete_Reason`
-- คอลัมน์สำคัญ: `Admin_Line` (col 3) — ระบบ auto-map จาก `source` sheet (col A = adminLine, col E = group); ถ้า map ไม่เจอ fallback เป็น `ไม่ระบุ`; ค่านี้ขับยอดรวมใน DS5
-- `Wallet_Type` (col 16) — auto-infer จาก `BTYPE` ผ่าน `_inferDS6Wtype()`
-- `DS8_Projects` / `DS9_Activities` — โมดูลแผนงานโครงการ (กำลังพัฒนา)
-
-## `DS7_Transfers`
-- ประวัติรอบโอนจากกรมแบบไม่จำกัดจำนวนรอบ
-- 1 รอบ = แถวหัวรอบ (budgetCode ว่าง) + แถวรายการย่อย (budgetCode มีค่า)
-- ใช้แสดงผลแท็บรอบโอน, สรุปรอบ, และ sync ย้อนกลับ DS2 หลังแก้/ลบรอบ
-
-## `source`
-- master dropdown/reference data (กลุ่มงาน, pool, wallet type, สถานะ, รหัสงบ ฯลฯ)
-- ใช้เติมตัวเลือกในฟอร์มฝั่งเว็บ
-- col A = `Admin_Line`, col E = `กลุ่มงาน` — ใช้ mapping group→adminLine ใน DS6 และ tab-plan
-
-## `DS8_Projects` (โมดูลแผนงานโครงการ — กำลังพัฒนา)
-- เก็บโครงการรายปีงบ (ชื่อ, สายบริหาร, กลุ่มงาน, ประเภทงบ, งบประมาณ, งบรายเดือน M0–M11)
-- ใช้แสดง Gantt chart และ KPI รายโครงการใน `tab-plan`
-
-## `DS9_Activities` (กิจกรรมภายในโครงการ — กำลังพัฒนา)
-- เก็บกิจกรรมย่อยภายในโครงการ DS8 (เดือน, งบ, สถานะ, เหตุผลเลื่อน)
-- ใช้แสดงรายละเอียด drill-down ใน `tab-plan`
+### tab-reports (รายละเอียด)
+แสดง 6 sections:
+- **A** KPI strip: งบจัดสรร / เบิกจ่ายสะสม / % vs เป้า / คงเหลือ
+- **B** Hero card + Donut chart: % เบิกรวม + สัดส่วน Wallet A/B/C/D
+- **C** Admin line bars: แท่ง % เบิกต่อสายบริหาร (เขียว/น้ำเงิน/แดง)
+- **D** Monthly stacked bar + Watchlist alerts
+- **E** Wallet breakdown table: Type | จัดสรร | เบิก | คงเหลือ | % | สถานะ
+- **F** Alert list + Executive summary text
 
 ---
 
-## 3) Data Flow หลักของระบบ
+## 2) Data Sheets Reference
 
-## Flow A: นำเข้างบจาก GFMIS (รอบโอน)
-1. ผู้ใช้ paste ในหน้า `นำเข้า GFMIS`
-2. `stagingImport` เขียนลง `DS0_Staging`
-3. ผู้ใช้ยืนยัน -> `confirmImport`
-4. ระบบอัปเดต `DS2_MasterBudget` + ลงธุรกรรม `DS1_Transactions`
-5. ถ้ามีวันที่รอบโอน ระบบบันทึกลง `DS7_Transfers`
-6. ระบบ recalculated `DS5_AdminAlloc`
+| Sheet | บทบาท | เขียนโดย | อ่านโดย |
+|-------|--------|---------|--------|
+| DS0_Staging | พื้นที่พัก paste GFMIS | `stagingImport` | `confirmImport` |
+| DS1_Transactions | Audit log ธุรกรรม | `confirmImport`, `saveGFInput` | `_bootstrapActivitiesFromTransactions` |
+| **DS2_MasterBudget** | **งบจัดสรรรายรหัส (แกนหลัก)** | `confirmImport`, `saveGFInput`, `_syncMasterAllocFromDS7` | `getDashboardData`, `getGFInputRows` |
+| DS3_Targets | เป้าเบิกจ่ายรายเดือน (%) | seed / manual | `getDashboardData` |
+| DS4_Logs | System audit log | `_log` (ทุก operation) | `getRecentLogs` |
+| DS5_AdminAlloc | สรุปสายบริหาร/Pool | `_recalcAdminAlloc`, `_syncActivitiesToDS5` | `getDashboardData`, tab-admin |
+| DS6_Activities | สมุดกันเงิน/กิจกรรม (soft delete) | `createActivity`, `updateActivity`, `deleteActivity` | `listActivities`, `_syncActivitiesToDS5` |
+| DS7_Transfers | ประวัติรอบโอนงบ | `processTransferRound`, `_recordTransferItems` | `listTransferRounds`, `_syncMasterAllocFromDS7` |
+| DS8_Projects | โครงการรายปี | `saveProject` | `getProjects` (dev) |
+| DS9_Activities | กิจกรรมย่อยในโครงการ | `saveActivity` | `getActivities` (dev) |
+| source | Master dropdown/reference | seed / manual | ทุก form ที่มี dropdown |
 
-## Flow B: อัปเดต PO/เบิกรายวัน
-1. หน้า `อัปเดต GFMIS รายวัน` โหลดข้อมูลจาก `DS2` (+ optional external GF_Input)
-2. บันทึกผ่าน `saveGFInput`
-3. อัปเดต `PO/Paid/Remaining` ใน `DS2` และลง log
-
-## Flow C: กันเงิน/กิจกรรม
-1. CRUD ที่ `tab-activities` เขียน `DS6_Activities`
-2. ฟอร์มบันทึก: เลือกกลุ่มงาน → `Admin_Line` auto-fill จาก `source` sheet (แก้ได้) → ส่ง payload พร้อม `adminLine` ไป backend
-3. backend `createActivity` / `updateActivity` ใช้ `p.adminLine` ถ้ามี มิฉะนั้น re-map จาก `_defaultAdminLineMap()`
-4. ทุกครั้งที่แก้ จะ sync สะท้อนยอดไป `DS5_AdminAlloc` ผ่าน `_syncActivitiesToDS5`
-5. Dashboard และ admin summary ดึงผลรวมจาก DS6/DS5
-
-## Flow D: บริหารรอบโอน (CRUD รอบ)
-1. สร้างรอบ: `processTransferRound` -> `DS7`
-2. แก้ metadata รอบ: `updateTransferRoundMeta`
-3. ลบรอบ: `deleteTransferRound`
-4. หลังลบ -> `_syncMasterAllocFromDS7` เพื่อคำนวณยอดจัดสรรใน `DS2` ใหม่จากรอบที่เหลือ
+**คอลัมน์สำคัญใน source:** col A = `Admin_Line`, col E = `กลุ่มงาน` (ใช้ mapping group→adminLine)
 
 ---
 
-## 4) ฟังก์ชัน Utility/Operation สำคัญ
+## 3) Data Flows
 
-- `setupSheets` / `initializeSystem`: สร้างชีทและ header ที่จำเป็น
-- `resetFiscalYear` / `resetFY2569`: ล้างข้อมูลเฉพาะปีงบ
-- `autoClassifyWalletTypes`: จัดประเภท A/B/C/D อัตโนมัติ
-- `identifyDashboardFailure`: ช่วยวินิจฉัยเมื่อ dashboard โหลดไม่ขึ้น
+### Flow A: นำเข้างบจาก GFMIS (รอบโอน)
+```
+User (tab-import)
+  → paste ข้อมูล
+  → stagingImport()         → DS0_Staging (write)
+  → [user กด ยืนยัน]
+  → confirmImport()
+      ├─ DS2_MasterBudget   (update Alloc/PO/Paid)
+      ├─ DS1_Transactions   (append audit row)
+      ├─ DS7_Transfers      (append ถ้ามี transferDate)
+      └─ _recalcAdminAlloc() → DS5_AdminAlloc (recalc)
+```
+
+### Flow B: อัปเดต PO/เบิกรายวัน
+```
+User (tab-gfinput)
+  → โหลด: getGFInputRows()  ← DS2_MasterBudget (read)
+  → แก้ PO/Paid
+  → saveGFInput()
+      ├─ DS2_MasterBudget   (update PO_Now, Paid_Now, Remaining)
+      └─ DS4_Logs           (append log)
+```
+
+### Flow C: กันเงิน/กิจกรรม (CRUD)
+```
+User (tab-activities)
+  → เลือกกลุ่มงาน → Admin_Line auto-fill จาก source sheet
+  → createActivity / updateActivity / deleteActivity
+      ├─ DS6_Activities     (write/update/soft-delete)
+      └─ _syncActivitiesToDS5()
+            └─ DS5_AdminAlloc (recalc ยอดเบิกต่อสายบริหาร)
+
+หมายเหตุ:
+  - Admin_Line (DS6 col 3) ขับยอดรวมใน DS5 โดยตรง
+  - ถ้า auto-map ผิด ให้แก้ที่ source (col A+E) แล้ว recalculate
+```
+
+### Flow D: บริหารรอบโอน (CRUD)
+```
+User (tab-transfer)
+  → processTransferRound()  → DS7_Transfers (append หัวรอบ + รายการย่อย)
+  → updateTransferRoundMeta() → DS7_Transfers (update metadata)
+  → deleteTransferRound()
+      ├─ DS7_Transfers       (mark deleted)
+      └─ _syncMasterAllocFromDS7()
+            └─ DS2_MasterBudget (recalc Alloc_Total จากรอบที่เหลือ)
+
+หมายเหตุ: ไม่จำกัดจำนวนรอบ (R1, R2, R3, ... Rn)
+```
+
+### Flow E: รายงาน (Reports)
+```
+User (tab-reports / tab-dashboard / tab-exec)
+  → getDashboardData(fiscalYear)
+      ├─ DS2_MasterBudget   (งบจัดสรร, PO, Paid, Remaining)
+      ├─ DS3_Targets         (เป้าเบิกรายเดือน)
+      ├─ DS5_AdminAlloc      (สรุปสายบริหาร)
+      └─ DS6_Activities      (ยอดกันเงิน/กิจกรรม)
+  → render ฝั่ง client
+      ├─ tab-dashboard: KPI card + group summary
+      ├─ tab-exec: trend chart + pool ratio
+      └─ tab-reports: 6 sections (KPI, hero %, donut, admin bars, monthly, wallet table)
+```
 
 ---
 
-## 5) ข้อควรระวังในการใช้งาน
+## 4) Key Functions Index
 
-- การนำเข้ารอบโอนควรใส่วันที่รอบก่อนยืนยัน เพื่อให้ trace ลง `DS7` ชัดเจน
-- ถ้าต้องแก้/ลบรอบโอน ให้ทำผ่าน CRUD ของแท็บ `รอบโอนงบ` เพื่อให้ `DS2` sync ตามอัตโนมัติ
-- การแก้ข้อมูลตรงในชีทโดยไม่ผ่านฟังก์ชัน อาจทำให้ยอดข้ามชีทไม่สอดคล้องกัน
-- `Admin_Line` ใน DS6 คือตัวขับยอด DS5 — ถ้า auto-fill ผิด ให้แก้ที่ `source` sheet (col A + col E) แล้ว recalculate DS5
-- mapping group→adminLine ดึงจาก `source` sheet ทุกครั้ง (ไม่ hardcode) — แก้ได้โดยไม่ต้อง deploy ใหม่
+| Function | Module | รับ | คืน |
+|----------|--------|-----|-----|
+| `doGet()` | Entry | - | HtmlOutput (web app) |
+| `getDashboardData(fy)` | Dashboard | fiscalYear | Object (kpi, tableRows, groupSummary, adminSummary, targets) |
+| `stagingImport(rows)` | Import | array of rows | staging result |
+| `confirmImport(date, fy)` | Import | transferDate, fiscalYear | import summary |
+| `setInitialBalance(id, ip, ipo, date)` | Import | budget params | - |
+| `getGFInputRows(fy)` | GFInput | fiscalYear | array |
+| `saveGFInput(updates)` | GFInput | array of updates | result |
+| `listActivities(fy, kw, page, size)` | Activities | params | paginated list |
+| `createActivity(payload, fy)` | Activities | payload | new row |
+| `updateActivity(id, payload, fy)` | Activities | id + payload | updated row |
+| `deleteActivity(id, fy, reason)` | Activities | id + reason | - |
+| `_syncActivitiesToDS5(fy)` | Sync | fiscalYear | - |
+| `listTransferRounds(fy)` | Transfer | fiscalYear | array |
+| `processTransferRound(date, fy, desc)` | Transfer | params | round object |
+| `deleteTransferRound(roundId, fy)` | Transfer | roundId | - |
+| `_syncMasterAllocFromDS7(fy, codes)` | Sync | fiscalYear, budgetCodes | - |
+| `manualRecalcAdminAlloc(fy)` | Admin | fiscalYear | - |
+| `overrideAdminAlloc(id, amount, note)` | Admin | allocId + override | - |
+| `getRecentLogs(n)` | Logs | n rows | array |
+| `autoClassifyWalletTypes(fy, onlyPending)` | Classify | params | summary |
 
+---
+
+## 5) Gotchas / ข้อควรระวัง
+
+- **ห้ามแก้ Sheet โดยตรง** — ยอดข้ามชีทจะไม่ sync ถ้าไม่ผ่านฟังก์ชัน
+- **รอบโอน**: ใส่ `transferDate` ก่อนยืนยัน เพื่อให้ trace ลง DS7 ชัดเจน
+- **ลบรอบโอน**: ต้องทำผ่าน tab-transfer เท่านั้น ถึงจะ sync DS2 ย้อนกลับ
+- **Admin_Line**: ถ้า auto-fill ผิด แก้ที่ `source` sheet (col A + col E) แล้ว recalculate DS5 — ไม่ต้อง deploy ใหม่
+- **DS6 soft delete**: row ที่ `Is_Deleted = true` จะไม่นับในยอดรวม DS5
+- **Wallet_Type X**: ยกเว้นจาก RBJ pool — ไม่นับในเป้าเบิก A+B+C+D
+- **DS8/DS9**: module แผนงานโครงการยังอยู่ระหว่างพัฒนา — ยังไม่ production ready

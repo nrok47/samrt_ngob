@@ -2784,22 +2784,28 @@ function getDashboardData(fiscalYear) {
       if (code) _codeToWtype[code] = String(r[C2.WTYPE] || 'A').trim();
     });
     const _ds6PaidByWtype = {};
+    const _ds6ReservedByWtype = {};  // กันเงินรอเบิก (ไม่ใช่เบิกจ่ายแล้ว, ไม่ใช่ยกเลิก)
     ds6ForFy.forEach(r => {
-      if (String(r[C6.STATUS] || '').trim() !== 'เบิกจ่ายแล้ว') return;
+      const status = String(r[C6.STATUS] || '').trim();
       const code = _normCode(r[C6.BUDGET_CODE]);
       const wt   = _codeToWtype[code] || 'A';
-      _ds6PaidByWtype[wt] = (_ds6PaidByWtype[wt] || 0) + _n(r[C6.PAID]);
+      if (status === 'เบิกจ่ายแล้ว') {
+        _ds6PaidByWtype[wt] = (_ds6PaidByWtype[wt] || 0) + _n(r[C6.PAID]);
+      } else if (status !== 'ยกเลิก') {
+        _ds6ReservedByWtype[wt] = (_ds6ReservedByWtype[wt] || 0) + _n(r[C6.BUDGET]);
+      }
     });
     const walletBreakdown = Object.entries(CONFIG.WALLET_META).map(([wt, meta]) => {
-      const rows      = md.filter(r => r[C2.WTYPE] === wt);
-      const alloc     = sum(rows, r => _n(r[C2.ALLOC_TOTAL]));
-      const paidGFMIS = sum(rows, tp);
-      const paidDS6   = _r(_ds6PaidByWtype[wt] || 0);
+      const rows        = md.filter(r => r[C2.WTYPE] === wt);
+      const alloc       = sum(rows, r => _n(r[C2.ALLOC_TOTAL]));
+      const paidGFMIS   = sum(rows, tp);
+      const paidDS6     = _r(_ds6PaidByWtype[wt]     || 0);
+      const reservedDS6 = _r(_ds6ReservedByWtype[wt] || 0);
       return {
         wtype: wt, ...meta,
         alloc, count: rows.length,
         paid: paidGFMIS,
-        paidGFMIS, paidDS6,
+        paidGFMIS, paidDS6, reservedDS6,
         pct:    alloc > 0 ? _r(paidGFMIS / alloc * 100) : 0,
         pctDS6: alloc > 0 ? _r(paidDS6   / alloc * 100) : 0,
       };
@@ -2810,14 +2816,16 @@ function getDashboardData(fiscalYear) {
     ds6ForFy.forEach(r => {
       const grp = String(r[C6.GROUP] || 'ไม่ระบุ').trim() || 'ไม่ระบุ';
       const status = String(r[C6.STATUS] || '').trim();
-      if (!groupMap[grp]) groupMap[grp] = { label: grp, allocated: 0, paid: 0 };
+      if (!groupMap[grp]) groupMap[grp] = { label: grp, allocated: 0, paid: 0, reserved: 0 };
       if (status !== 'ยกเลิก') groupMap[grp].allocated += _n(r[C6.BUDGET]);
       if (status === 'เบิกจ่ายแล้ว') groupMap[grp].paid += _n(r[C6.PAID]);
+      else if (status !== 'ยกเลิก') groupMap[grp].reserved += _n(r[C6.BUDGET]);
     });
     const groupSummary = Object.values(groupMap).map(g => ({
       label:     g.label,
       allocated: _r(g.allocated),
       paid:      _r(g.paid),
+      reserved:  _r(g.reserved),
       paidPct:   g.allocated > 0 ? _r(g.paid / g.allocated * 100) : 0,
       alert: (() => {
         const p = g.allocated > 0 ? _r(g.paid / g.allocated * 100) : 0;
@@ -3067,6 +3075,10 @@ function getDashboardData(fiscalYear) {
         gfmisReconDiff,            // |totalPaidAll − ds6GfmisPaid|
         po:sum(budget,r=>_n(r[C2.PO])),
         remaining:sum(budget,r=>_n(r[C2.REMAIN])),
+        remainingAfterReservation: _r(sum(budget,r=>_n(r[C2.REMAIN])) - ds6ForFy.reduce((s,r) => {
+          const st = String(r[C6.STATUS]||'').trim();
+          return (st !== 'ยกเลิก' && st !== 'เบิกจ่ายแล้ว') ? s + _n(r[C6.BUDGET]) : s;
+        }, 0)),
         paidPct, targetPct:tpct,
         targetMonth:tgt?tgt.month:'-',
         rowCount: tableRows.length,

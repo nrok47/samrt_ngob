@@ -122,6 +122,7 @@
 
       _set('kpi-po', fmt(s.reserved || 0));
       _set('kpi-remaining', fmt(s.remaining));
+      _set('kpi-remaining-net', fmt(s.remainingAfterReservation ?? s.remaining));
       _set('kpi-gfmis-paid', fmt(s.grandPaid));
       _set('kpi-gfmis-alloc', fmt(s.grandAlloc));
       _set('kpi-rows', s.rowCount);
@@ -189,6 +190,12 @@
         : '';
       _set('progress-desc', `เบิกจ่ายสะสม (A+B+C+D) ${fmt(s.paid)} บาท จาก ${fmt(s.allocated)} บาท · เป้าเดือน ${s.targetMonth}: ${target}% · รวมตามสาย ${fmt(linePaidShow)}${modeNote}${recon}`);
 
+      // Dashboard v2 — Pastel overview panel
+      renderDv2Overview(s, res, target);
+
+      // Reports tab
+      renderReportTab(s, res, target);
+
       // Chart: admin=DS5 สายบริหาร (Panel 2); group chart rendered in renderStrategicPanel (Panel 3)
       renderSimpleChart('chart-admin', res.adminSummary, target);
 
@@ -200,8 +207,10 @@
 
       // Panel 1 — Monthly Trend (reuse exec trend renderer for #dash-trend)
       renderTrendBars('dash-trend', res.monthlyTrend, target);
+      renderMonthlyTable(res.monthlyTrend, res.summary);
 
       // Panel 2 — Recon panel
+      walletBreakdown = res.walletBreakdown || null;
       renderReconPanel(res);
 
       // Panel 3 — Strategic Progress
@@ -234,9 +243,19 @@
       _setTxt('exec-fy', '2569');
       _setTxt('exec-update', s.lastUpdate || '-');
 
-      // KPI 4 ไพเด่น
+      // Hero section
       const pct = s.paidPct || 0;
       const kpiClr = pct >= target ? 'var(--green)' : pct >= target - 10 ? 'var(--amber)' : 'var(--rose)';
+      const heroClr = pct >= target ? '#86efac' : pct >= target - 10 ? '#fde68a' : '#fca5a5';
+      _setTxt('exec-hero-alloc', fmt(s.allocated));
+      _setTxt('exec-hero-paid',  fmt(s.paid));
+      _setTxt('exec-hero-remain', fmt(s.remainingAfterReservation ?? s.remaining));
+      const heroEl = _el('exec-hero-pct');
+      if (heroEl) { heroEl.textContent = pct.toFixed(1) + '%'; heroEl.style.color = heroClr; }
+      _setTxt('exec-hero-pct-sub', `เป้า ${target}% · ${pct >= target ? '✅ ผ่านเป้า' : pct >= target - 10 ? '⚠ ใกล้เคียง' : '❌ ต่ำกว่าเป้า'}`);
+
+      // Monthly table in exec tab
+      _renderExecMonthlyTable(res.monthlyTrend, s);
       const kpiEl = _el('exec-kpi');
       if (kpiEl) kpiEl.innerHTML = [
         { label: 'งบดำเนินงาน (A+B+C+D)', val: fmt(s.allocated), color: 'var(--navy)', sub: '' },
@@ -416,6 +435,54 @@
       }
     }
 
+    function _renderExecMonthlyTable(monthlyTrend, summary) {
+      const tbody = document.getElementById('exec-monthly-tbody');
+      if (!tbody) return;
+      if (!monthlyTrend || !monthlyTrend.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-dim)">ยังไม่มีข้อมูล</td></tr>';
+        return;
+      }
+      const allocated = (summary && summary.allocated) || 1;
+      let cumPaid = 0;
+      tbody.innerHTML = monthlyTrend.map(m => {
+        cumPaid += (m.paidAmt || 0);
+        const pct    = m.paidCumPct || 0;
+        const tgt    = m.targetCumPct || null;
+        const remain = allocated - cumPaid;
+        const clr    = !m.isPast ? 'var(--text-dim)'
+          : tgt == null ? 'var(--navy)'
+          : pct >= tgt ? '#0d9488' : pct >= tgt - 10 ? '#d97706' : '#e11d48';
+        const badge  = !m.isPast ? ''
+          : tgt == null ? ''
+          : pct >= tgt
+            ? '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#d1fae5;color:#065f46">✅ ผ่าน</span>'
+            : pct >= tgt - 10
+              ? '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#fef9c3;color:#854d0e">⚠ ใกล้</span>'
+              : '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#fee2e2;color:#991b1b">❌ ต่ำ</span>';
+        const cur = m.isCurrent;
+        return `<tr style="${cur ? 'background:#f5f3ff;font-weight:700' : ''}">
+          <td>${m.month}${cur ? ' <span style="font-size:10px;color:#7c3aed">← เดือนนี้</span>' : ''}</td>
+          <td class="num" style="font-family:'IBM Plex Mono',monospace">${m.isPast ? fmt(m.paidAmt||0) : '—'}</td>
+          <td class="num" style="font-family:'IBM Plex Mono',monospace;color:${clr};font-weight:600">${m.isPast ? fmt(cumPaid) : '—'}</td>
+          <td class="num" style="font-family:'IBM Plex Mono',monospace;color:${clr}">${m.isPast ? pct.toFixed(1)+'%' : '—'}</td>
+          <td class="num" style="color:var(--text-dim)">${tgt != null ? tgt+'%' : '—'}</td>
+          <td class="num" style="font-family:'IBM Plex Mono',monospace;color:#e11d48;font-weight:${remain<0?700:400}">${m.isPast ? fmt(remain) : '—'}</td>
+          <td style="text-align:center">${badge}</td>
+        </tr>`;
+      }).join('');
+      // tfoot
+      const lastCum = monthlyTrend.filter(m => m.isPast).reduce((s, m) => s + (m.paidAmt||0), 0);
+      const tfEl = document.getElementById('exec-monthly-tfoot');
+      if (tfEl) tfEl.innerHTML = `<tr style="background:var(--navy);color:#fff;font-weight:700">
+        <td style="padding:10px 12px">รวมถึงปัจจุบัน</td>
+        <td class="num" style="padding:10px 12px">${fmt(lastCum)}</td>
+        <td class="num" style="padding:10px 12px">—</td>
+        <td class="num" style="padding:10px 12px">${allocated>0?(lastCum/allocated*100).toFixed(1)+'%':'—'}</td>
+        <td colspan="2" class="num" style="padding:10px 12px;color:#86efac">คงเหลือ ${fmt(allocated-lastCum)}</td>
+        <td></td>
+      </tr>`;
+    }
+
     function renderInvestment(data) {
       if (!data || !data.length) {
         document.getElementById('invest-section').style.display = 'none';
@@ -488,6 +555,400 @@
     }
 
     // ════════════════════════════════════════════════
+    //  MONTHLY TABLE — ตารางรายเดือน
+    // ════════════════════════════════════════════════
+    function renderMonthlyTable(monthlyTrend, summary) {
+      const tbody = document.getElementById('monthly-tbody');
+      if (!tbody) return;
+      if (!monthlyTrend || !monthlyTrend.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-dim)">ยังไม่มีข้อมูล</td></tr>';
+        return;
+      }
+      const allocated = (summary && summary.allocated) || 1;
+      let cumPaid = 0;
+      tbody.innerHTML = monthlyTrend.map(m => {
+        if (!m.isPast && m.paidAmt === 0) return '';
+        cumPaid += (m.paidAmt || 0);
+        const pct     = m.paidCumPct  || 0;
+        const tgt     = m.targetCumPct || null;
+        const remain  = allocated - cumPaid;
+        const clr = tgt == null ? 'var(--text-dim)'
+          : pct >= tgt ? '#0d9488'
+          : pct >= tgt - 10 ? '#d97706' : '#e11d48';
+        const badge = !m.isPast ? '<span style="color:var(--text-dim)">—</span>'
+          : tgt == null ? ''
+          : pct >= tgt
+            ? '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#d1fae5;color:#065f46">✅ ผ่านเป้า</span>'
+            : pct >= tgt - 10
+              ? '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#fef9c3;color:#854d0e">⚠ ใกล้เคียง</span>'
+              : '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#fee2e2;color:#991b1b">❌ ต่ำกว่าเป้า</span>';
+        const isCurStyle = m.isCurrent ? 'background:#f5f3ff;font-weight:700' : '';
+        return `<tr style="${isCurStyle}">
+          <td>${m.month}${m.isCurrent ? ' <span style="font-size:10px;color:#7c3aed;font-weight:600">← ปัจจุบัน</span>' : ''}</td>
+          <td class="num" style="font-family:'IBM Plex Mono',monospace">${m.isPast ? fmt(m.paidAmt || 0) : '<span style="color:var(--text-dim)">—</span>'}</td>
+          <td class="num" style="font-family:'IBM Plex Mono',monospace;color:${clr};font-weight:600">${m.isPast ? fmt(cumPaid) : '<span style="color:var(--text-dim)">—</span>'}</td>
+          <td class="num" style="font-family:'IBM Plex Mono',monospace;color:${clr}">${m.isPast ? pct.toFixed(1) + '%' : '—'}</td>
+          <td class="num" style="color:var(--text-dim)">${tgt != null ? tgt + '%' : '—'}</td>
+          <td>${badge}</td>
+        </tr>`;
+      }).join('');
+
+      // tfoot with remaining
+      const lastCum = monthlyTrend.filter(m => m.isPast).reduce((s, m) => s + (m.paidAmt || 0), 0);
+      const netRemain = allocated - lastCum;
+      const tfoot = `<tr style="background:var(--navy);color:#fff;font-weight:700">
+        <td style="padding:10px 12px">รวม / คงเหลือ</td>
+        <td class="num" style="padding:10px 12px">${fmt(lastCum)}</td>
+        <td class="num" style="padding:10px 12px">—</td>
+        <td class="num" style="padding:10px 12px">${allocated > 0 ? (lastCum/allocated*100).toFixed(1)+'%' : '—'}</td>
+        <td colspan="2" class="num" style="padding:10px 12px;color:#86efac">คงเหลือ ${fmt(netRemain)}</td>
+      </tr>`;
+      const tableEl = document.getElementById('monthly-table');
+      if (tableEl) {
+        let tf = tableEl.querySelector('tfoot');
+        if (!tf) { tf = document.createElement('tfoot'); tableEl.appendChild(tf); }
+        tf.innerHTML = tfoot;
+      }
+    }
+
+    // ════════════════════════════════════════════════
+    //  Dashboard v2 — Pastel Overview (ภาพรวมผู้บริหาร)
+    // ════════════════════════════════════════════════
+    function renderDv2Overview(s, res, target) {
+      const _set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+      const _setStyle = (id, p, v) => { const e = document.getElementById(id); if (e) e.style[p] = v; };
+
+      const pct = s.paidPct || 0;
+
+      // Hero: big number + bar
+      _set('dv2-hero-pct', pct.toFixed(2));
+      _set('dv2-hero-paid', fmt(s.paid || 0));
+      _set('dv2-hero-alloc', fmt(s.allocated || 0));
+      setTimeout(() => { _setStyle('dv2-heroBar', 'width', Math.min(pct, 100) + '%'); }, 100);
+
+      // target marker
+      const marker = document.getElementById('dv2-marker-t');
+      const markerLbl = document.getElementById('dv2-marker-t-lbl');
+      if (marker) marker.style.left = Math.min(target, 100) + '%';
+      if (markerLbl) markerLbl.textContent = `เป้า ${target}%`;
+      if (marker) marker.classList.toggle('dv2-fail-marker', pct < target);
+
+      // status pills
+      _set('dv2-pill-target-pct', target);
+      const pill = document.getElementById('dv2-pill-target');
+      const passed = pct >= target;
+      if (pill) {
+        pill.classList.toggle('dv2-pass', passed);
+        pill.classList.toggle('dv2-fail', !passed);
+      }
+      const diff = Math.abs(pct - target).toFixed(2);
+      _set('dv2-pill-target-v', passed ? `✓ ผ่านแล้ว · +${diff}%` : `✕ ยังขาด ${diff}%`);
+      _set('dv2-pill-month', s.targetMonth || '—');
+
+      // KPI strip — wallet breakdown
+      const wbMap = {};
+      (res.walletBreakdown || []).forEach(w => { wbMap[w.wtype] = w; });
+
+      // งบดำเนินงาน (A)
+      const wA = wbMap['A'];
+      if (wA && wA.alloc > 0) {
+        const p = wA.paid / wA.alloc * 100;
+        _set('dv2-kpi-op-pct', p.toFixed(2));
+        _set('dv2-kpi-op-amt', `฿${fmt(wA.paid)} / ฿${fmt(wA.alloc)}`);
+        const badge = document.getElementById('dv2-kpi-op-badge');
+        if (badge) {
+          const cls = p >= target ? 'dv2-pass' : p >= target - 10 ? 'dv2-warn' : 'dv2-fail';
+          badge.textContent = p >= target ? '✓ ผ่านเป้า' : p >= target - 10 ? '● ใกล้เคียง' : '✕ ต่ำกว่าเป้า';
+          badge.className = `dv2-new-badge ${cls}`;
+        }
+      }
+
+      // งบลงทุน (C + F)
+      const wC = wbMap['C'], wF = wbMap['F'];
+      const invAlloc = ((wC && wC.alloc) || 0) + ((wF && wF.alloc) || 0);
+      const invPaid  = ((wC && wC.paid)  || 0) + ((wF && wF.paid)  || 0);
+      if (invAlloc > 0) {
+        const p = invPaid / invAlloc * 100;
+        _set('dv2-kpi-inv-pct', p.toFixed(2));
+        _setStyle('dv2-kpi-inv-v', 'color', p >= 100 ? '#a8d8a0' : p >= target ? '#7cc5b7' : '#ef9a8a');
+        _set('dv2-kpi-inv-amt', `฿${fmt(invPaid)} / ฿${fmt(invAlloc)}`);
+        const badge = document.getElementById('dv2-kpi-inv-badge');
+        if (badge) {
+          badge.textContent = p >= 100 ? '✓ เบิกจ่ายครบ' : p >= target ? '✓ ผ่านเป้า' : '● ยังไม่ผ่านเป้า';
+          badge.className = 'dv2-new-badge ' + (p >= 100 || p >= target ? 'dv2-pass' : 'dv2-muted');
+        }
+      } else {
+        _set('dv2-kpi-inv-pct', '—');
+        _set('dv2-kpi-inv-amt', 'ไม่มีงบลงทุนปีนี้');
+        const badge = document.getElementById('dv2-kpi-inv-badge');
+        if (badge) { badge.textContent = 'N/A'; badge.className = 'dv2-new-badge dv2-muted'; }
+      }
+
+      // Last update + row count
+      _set('dv2-kpi-lastupdate', s.lastUpdate || '—');
+      _set('dv2-kpi-rowcount', s.rowCount ? `${s.rowCount} รายการ` : '—');
+
+      // RAYSAI bars — รายสายบริหาร
+      const barsEl = document.getElementById('dv2RaysaiBars');
+      const data = res.adminSummary || [];
+      if (barsEl && data.length) {
+        const n = data.length;
+        barsEl.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+        const maxPct = Math.max(...data.map(d => Number(d.paidPct ?? d.pct) || 0), target, 10);
+        barsEl.innerHTML = data.map(d => {
+          const p = Math.min(Number(d.paidPct != null ? d.paidPct : d.pct) || 0, 200);
+          const cls = p >= target ? 'dv2-pass-both' : p >= target - 10 ? 'dv2-pass-grm' : 'dv2-fail-both';
+          const h = Math.max((p / maxPct) * 180, 2).toFixed(0);
+          const lbl = (d.label || d.line || '').replace(/\s*\(.*?\)\s*/g, '').trim();
+          return `<div class="dv2-raybar ${cls}">
+            <div class="dv2-pct">${p.toFixed(1)}%</div>
+            <div class="dv2-b" style="height:${h}px"></div>
+            <div class="dv2-lbl">${lbl}</div>
+          </div>`;
+        }).join('');
+        _set('dv2-raysai-meta', `${n} สายบริหาร · เป้า ${target}%`);
+      }
+    }
+
+    // ════════════════════════════════════════════════
+    //  TAB: REPORTS — รายงานสรุปครบวงจร
+    // ════════════════════════════════════════════════
+    function renderReportTab(s, res, target) {
+      const el  = id => document.getElementById(id);
+      const set = (id, v) => { const e = el(id); if (e) e.textContent = v; };
+      const setH = (id, v) => { const e = el(id); if (e) e.innerHTML = v; };
+
+      // ── Header ──────────────────────────────────────
+      set('rpt-fy', String(s.fiscalYear || _selectedYear));
+      set('rpt-asof', `ณ วันที่ ${s.lastUpdate || '—'}\nอัปเดตโดย ทีมการเงิน`);
+      set('rpt-footer-time', `สร้างเมื่อ ${new Date().toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short'})}`);
+
+      // ── Section A · KPI strip ───────────────────────
+      set('rpt-alloc',     fmt(s.allocated || 0));
+      set('rpt-paid',      fmt(s.paid || 0));
+      set('rpt-paid-d',    `ณ ${s.lastUpdate || '—'}`);
+      const pct = s.paidPct || 0;
+      set('rpt-pct',       pct.toFixed(2) + '%');
+      set('rpt-pct-d',     `เป้า ${target}%`);
+      el('rpt-pct') && (el('rpt-pct').style.color = pct >= target ? '#a8d8a0' : pct >= target-10 ? '#f9d9a8' : '#ef9a8a');
+      set('rpt-remain',    fmt(s.remaining || 0));
+      set('rpt-remain-d',  `คงเหลือ ${((s.remaining||0)/(s.allocated||1)*100).toFixed(1)}% ของงบ`);
+
+      // ── Section B · Hero ────────────────────────────
+      set('rpt-big-pct',   pct.toFixed(2));
+      set('rpt-big-paid',  fmt(s.paid || 0));
+      set('rpt-big-alloc', fmt(s.allocated || 0));
+      setTimeout(() => {
+        const bar = el('rpt-prog-bar');
+        if (bar) bar.style.width = Math.min(pct, 100) + '%';
+      }, 120);
+      const marker = el('rpt-prog-marker');
+      const markerLbl = el('rpt-prog-marker-lbl');
+      if (marker) marker.style.left = Math.min(target, 100) + '%';
+      if (markerLbl) markerLbl.textContent = `เป้า ${target}%`;
+      const pill = el('rpt-pill-status');
+      const passed = pct >= target;
+      if (pill) {
+        pill.style.background = passed ? 'rgba(168,216,160,.65)' : 'rgba(239,154,138,.5)';
+      }
+      const diff = Math.abs(pct - target).toFixed(2);
+      set('rpt-pill-status-v', passed ? `✓ ผ่านแล้ว · +${diff}%` : `✕ ยังขาด ${diff}%`);
+      set('rpt-pill-month', s.targetMonth || '—');
+
+      // ── Section B · Donut (wallet breakdown) ────────
+      const wbMap = {};
+      (res.walletBreakdown || []).forEach(w => { wbMap[w.wtype] = w; });
+      const wtLabel = { A:'ดำเนินงาน', B:'บุคลากร', C:'ลงทุน', D:'เบิกแทนกัน', E:'อุดหนุน', F:'ลงทุน(อื่น)' };
+      const wtColor = { A:'#a4c8ec', B:'#f6c1d4', C:'#a8d8a0', D:'#f9d9a8', E:'#c8b6e2', F:'#7cc5b7' };
+      const donutData = ['A','B','C','D','E','F']
+        .map(k => ({ wtype:k, label:`${k} · ${wtLabel[k]||k}`, paid: (wbMap[k]&&wbMap[k].paid)||0, color: wtColor[k] }))
+        .filter(d => d.paid > 0);
+      const totalPaid = donutData.reduce((s,d) => s + d.paid, 0) || 1;
+
+      const donutSvg = el('rpt-donut');
+      const donutLeg = el('rpt-donut-legend');
+      if (donutSvg && donutData.length) {
+        let acc = 0;
+        const segs = donutData.map(d => {
+          const share = d.paid / totalPaid;
+          const s = acc, e = acc + share; acc = e;
+          return { ...d, share, s, e };
+        });
+        donutSvg.innerHTML = segs.map(seg => {
+          const a0 = seg.s * Math.PI * 2, a1 = seg.e * Math.PI * 2;
+          const x0 = Math.cos(a0), y0 = Math.sin(a0);
+          const x1 = Math.cos(a1), y1 = Math.sin(a1);
+          const large = (seg.e - seg.s) > 0.5 ? 1 : 0;
+          return `<path d="M${x0} ${y0} A1 1 0 ${large} 1 ${x1} ${y1} L${x1*.55} ${y1*.55} A.55 .55 0 ${large} 0 ${x0*.55} ${y0*.55}Z" fill="${seg.color}"/>`;
+        }).join('');
+        donutLeg.innerHTML = segs.map(seg =>
+          `<div style="display:grid;grid-template-columns:10px 1fr auto;gap:8px;align-items:center;padding:3px 0">
+            <span style="width:10px;height:10px;border-radius:2px;background:${seg.color};display:inline-block"></span>
+            <span style="font-size:11px;color:#3a3654">${seg.label}</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:11px;color:#3a3654">${(seg.share*100).toFixed(1)}%</span>
+          </div>`
+        ).join('');
+      }
+
+      // ── Section C · RAYSAI bars ──────────────────────
+      const adminData = res.adminSummary || [];
+      const raysaiEl = el('rpt-raysai-bars');
+      if (raysaiEl && adminData.length) {
+        const n = adminData.length;
+        raysaiEl.style.gridTemplateColumns = `repeat(${n},1fr)`;
+        const maxP = Math.max(...adminData.map(d => Number(d.paidPct??d.pct)||0), target, 10);
+        raysaiEl.innerHTML = adminData.map(d => {
+          const p = Math.min(Number(d.paidPct!=null?d.paidPct:d.pct)||0, 200);
+          const color = p >= target ? '#a8d8a0' : p >= target-10 ? '#a4c8ec' : '#ef9a8a';
+          const h = Math.max((p/maxP)*170, 2).toFixed(0);
+          const lbl = (d.label||d.line||'').replace(/\s*\(.*?\)\s*/g,'').trim();
+          return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end">
+            <div style="font-size:11px;font-family:'IBM Plex Mono',monospace;font-weight:600;color:#3a3654">${p.toFixed(1)}%</div>
+            <div style="width:100%;max-width:52px;background:${color};border-radius:8px 8px 0 0;height:${h}px;transition:height .7s ease;min-height:2px"></div>
+            <div style="font-size:10px;line-height:1.15;color:#9b8fa8;text-align:center;height:32px;overflow:hidden">${lbl}</div>
+          </div>`;
+        }).join('');
+        set('rpt-raysai-meta', `${n} สายบริหาร · เป้า ${target}%`);
+      }
+
+      // ── Section D · Monthly chart ────────────────────
+      const monthly = res.monthlyTrend || [];
+      const monthlyEl = el('rpt-monthly-chart');
+      const monthlyLabels = el('rpt-monthly-labels');
+      if (monthlyEl && monthly.length) {
+        const maxPct = Math.max(...monthly.map(m => Math.max(m.paidCumPct||0, m.targetCumPct||0)), 20);
+        monthlyEl.innerHTML = monthly.map(m => {
+          const tH = Math.max(((m.targetCumPct||0)/maxPct)*140, 2).toFixed(0);
+          const aH = m.paidCumPct > 0 ? Math.max((m.paidCumPct/maxPct)*140, 2).toFixed(0) : 0;
+          const color = !m.isPast ? '#e2e8f0' : m.paidCumPct >= (m.targetCumPct||0) ? '#0d9488' : m.paidCumPct >= (m.targetCumPct||0)-10 ? '#d97706' : '#e11d48';
+          return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;min-width:28px">
+            <div style="display:flex;gap:2px;align-items:flex-end;width:100%;justify-content:center">
+              <div style="flex:1;background:#e2e8f0;border-radius:3px 3px 0 0;height:${tH}px;max-width:14px"></div>
+              ${aH > 0 ? `<div style="flex:1;background:${color};border-radius:3px 3px 0 0;height:${aH}px;max-width:14px"></div>` : ''}
+            </div>
+          </div>`;
+        }).join('');
+        if (monthlyLabels) {
+          monthlyLabels.innerHTML = monthly.map(m =>
+            `<div style="flex:1;min-width:28px;text-align:center;color:${m.isPast?'#3a3654':'#9b8fa8'}">${m.month||''}</div>`
+          ).join('');
+        }
+      }
+
+      // ── Section D · Watchlist ────────────────────────
+      const watchEl = el('rpt-watchlist');
+      if (watchEl && adminData.length) {
+        const sorted = [...adminData].sort((a,b) => {
+          const pa = Number(a.paidPct??a.pct)||0;
+          const pb = Number(b.paidPct??b.pct)||0;
+          return pa - pb; // เรียงจากต่ำสุด
+        });
+        const show = sorted.slice(0, 6);
+        watchEl.innerHTML = show.map(d => {
+          const p = Number(d.paidPct!=null?d.paidPct:d.pct)||0;
+          const over = p >= target;
+          const bg = over ? '#f0fdf4' : p >= target-10 ? '#fffbeb' : '#fff5f5';
+          const clr = over ? '#16a34a' : p >= target-10 ? '#d97706' : '#e11d48';
+          const icon = over ? '✓' : p >= target-10 ? '●' : '✕';
+          const lbl = (d.label||d.line||'').replace(/\s*\(.*?\)\s*/g,'').trim();
+          const diff = Math.abs(p-target).toFixed(1);
+          const note = over ? `+${diff}%` : `ขาด ${diff}%`;
+          return `<div class="rpt-watch-item" style="background:${bg}">
+            <div class="rpt-wi-nm" style="color:${clr}" title="${lbl}">${icon} ${lbl}</div>
+            <div class="rpt-wi-pct" style="color:${clr}">${p.toFixed(1)}%</div>
+            <div class="rpt-wi-desc" style="color:${clr}">${note}</div>
+          </div>`;
+        }).join('');
+      }
+
+      // ── Section E · Wallet breakdown table ───────────
+      const tbody = el('rpt-wallet-tbody');
+      const tfoot = el('rpt-wallet-tfoot');
+      if (tbody) {
+        const rows = ['A','B','C','D','E','F'].map(k => ({ wtype:k, ...wbMap[k] })).filter(w => w.alloc > 0);
+        const totAlloc = rows.reduce((a,w) => a+(w.alloc||0),0);
+        const totPaid  = rows.reduce((a,w) => a+(w.paid||0),0);
+        tbody.innerHTML = rows.map(w => {
+          const p = w.alloc > 0 ? (w.paid/w.alloc*100) : 0;
+          const over = p >= target, near = p >= target-10;
+          const pillCls = over ? '#a8d8a0:#3a3654' : near ? '#f9d9a8:#3a3654' : '#ef9a8a:#fff';
+          const [pbg,pclr] = pillCls.split(':');
+          const barW = Math.min(p,100).toFixed(1);
+          const remain = (w.alloc||0)-(w.paid||0);
+          return `<tr style="border-bottom:1px solid #f5ecf2">
+            <td style="padding:10px 18px;white-space:nowrap">
+              <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-weight:700;font-size:11px;background:${wtColor[w.wtype]||'#f1f5f9'};color:#3a3654;font-family:'IBM Plex Mono',monospace">${w.wtype}</span>
+            </td>
+            <td style="padding:10px 18px;font-size:12px;color:#3a3654">${wtLabel[w.wtype]||w.wtype}</td>
+            <td style="padding:10px 18px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px">${fmt(w.alloc||0)}</td>
+            <td style="padding:10px 18px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600">${fmt(w.paid||0)}</td>
+            <td style="padding:10px 18px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;color:${remain<0?'#e11d48':'#9b8fa8'}">${fmt(remain)}</td>
+            <td style="padding:10px 18px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:#3a3654">${p.toFixed(1)}%</td>
+            <td style="padding:10px 18px;min-width:120px">
+              <div style="height:8px;background:#f5ecf2;border-radius:99px;overflow:hidden">
+                <div style="height:100%;width:${barW}%;background:${pbg};border-radius:99px;transition:width .8s"></div>
+              </div>
+            </td>
+            <td style="padding:10px 18px;text-align:center">
+              <span style="padding:2px 10px;border-radius:999px;font-size:10px;font-weight:600;background:${pbg};color:${pclr};font-family:'IBM Plex Mono',monospace">${over?'✓ ผ่านเป้า':near?'● ใกล้เคียง':'✕ ต่ำกว่าเป้า'}</span>
+            </td>
+          </tr>`;
+        }).join('');
+        if (tfoot) {
+          const totalPct = totAlloc > 0 ? (totPaid/totAlloc*100) : 0;
+          tfoot.innerHTML = `<tr style="background:#fbf4f7;border-top:2px solid #ecdfe8;font-weight:700">
+            <td colspan="2" style="padding:12px 18px;font-size:12px;color:#3a3654">รวมทั้งหมด</td>
+            <td style="padding:12px 18px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px">${fmt(totAlloc)}</td>
+            <td style="padding:12px 18px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#3a3654">${fmt(totPaid)}</td>
+            <td style="padding:12px 18px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#9b8fa8">${fmt(totAlloc-totPaid)}</td>
+            <td style="padding:12px 18px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#3a3654">${totalPct.toFixed(2)}%</td>
+            <td colspan="2"></td>
+          </tr>`;
+        }
+      }
+
+      // ── Section F · Alerts + Summary text ────────────
+      const alertsEl = el('rpt-alerts');
+      if (alertsEl && adminData.length) {
+        const flagged = adminData
+          .map(d => ({ ...d, p: Number(d.paidPct??d.pct)||0 }))
+          .filter(d => d.p < target - 10 || d.p > target + 20);
+        const sorted = [...flagged].sort((a,b) => a.p - b.p);
+        alertsEl.innerHTML = sorted.slice(0,5).map(d => {
+          const lbl = (d.label||d.line||'').replace(/\s*\(.*?\)\s*/g,'').trim();
+          const over = d.p > target + 20;
+          const cls  = over ? '' : 'alert';
+          const diff = Math.abs(d.p - target).toFixed(1);
+          return `<div class="rpt-alert-item ${cls}">
+            <b>${over ? '▲' : '▼'} ${lbl} · ${d.p.toFixed(1)}%</b>
+            ${over ? `เบิกจ่ายสูงกว่าเป้า +${diff}% — ตรวจสอบความถูกต้อง` : `ต่ำกว่าเป้า ${diff}% — เร่งเบิกจ่ายก่อนสิ้นปีงบ`}
+          </div>`;
+        }).join('') || '<div style="color:#9b8fa8;font-size:12px">ไม่มีรายการเฝ้าระวัง</div>';
+      }
+
+      // Summary text (auto-generate)
+      const summaryEl = el('rpt-summary-text');
+      if (summaryEl) {
+        const over = adminData.filter(d => (Number(d.paidPct??d.pct)||0) >= target).length;
+        const under = adminData.length - over;
+        const lines = [];
+        if (passed) {
+          lines.push(`<span style="color:#16a34a;font-weight:600">✓ ยอดเบิกจ่ายรวม ${pct.toFixed(2)}% ผ่านเป้าหมาย ${target}% แล้ว</span>`);
+        } else {
+          lines.push(`<span style="color:#e11d48;font-weight:600">✕ ยอดเบิกจ่ายรวม ${pct.toFixed(2)}% ยังต่ำกว่าเป้า ${target}% (ขาด ${(target-pct).toFixed(2)}%)</span>`);
+        }
+        lines.push(`• สายบริหารที่ผ่านเป้า ${over} จาก ${adminData.length} สาย`);
+        if (under > 0) lines.push(`• สายบริหารที่ยังต้องเร่งรัด ${under} สาย`);
+        const wA = wbMap['A'];
+        if (wA && wA.alloc > 0) {
+          const pA = (wA.paid/wA.alloc*100).toFixed(1);
+          lines.push(`• งบดำเนินงาน (Type A) เบิกจ่าย ${pA}% · ${pA >= target ? 'ผ่านเป้า' : 'ยังไม่ผ่านเป้า'}`);
+        }
+        summaryEl.innerHTML = lines.join('<br>');
+      }
+    }
+
+    // ════════════════════════════════════════════════
     //  PANEL 2 — กระทบยอด GFMIS
     // ════════════════════════════════════════════════
     function renderReconPanel(res) {
@@ -519,20 +980,54 @@
       // Summary list (right side card)
       const listEl = _el('recon-summary-list');
       if (listEl) {
+        const ds6Pending = walletBreakdown ? walletBreakdown.reduce((sum, w) => sum + (w.reservedDS6 || 0), 0) : 0;
         const items = [
           { label:'งบรวม (GFMIS grandAlloc)', val: fmt(s.grandAlloc), color:'var(--navy)' },
           { label:'เบิก GFMIS (A–F)', val: fmt(s.grandPaid), color:'#2457a0' },
           { label:'กันเงิน DS6 เบิกแล้ว (A–F)', val: fmt(s.activityPaidTotal), color:'#0d9488' },
+          { label:'กันเงิน DS6 รอเบิก', val: fmt(ds6Pending), color:'#7c3aed' },
           { label:'D — เบิกแทนกัน', val: fmt(s.reconcileTotal), color:'#d97706' },
-          { label:'คงเหลือ', val: fmt(s.remaining), color:'var(--rose)' },
+          { label:'คงเหลือ GFMIS', val: fmt(s.remaining), color:'var(--rose)' },
+          { label:'คงเหลือสุทธิ (หลังกันเงิน)', val: fmt(s.remainingAfterReservation ?? s.remaining), color:'#e11d48', bold: true },
         ];
         listEl.innerHTML = items.map(it => `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
-            <span style="color:var(--text-dim)">${it.label}</span>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)${it.bold ? ';border-top:2px solid var(--border);margin-top:4px' : ''}">
+            <span style="color:var(--text-dim);font-weight:${it.bold ? 700 : 400}">${it.label}</span>
             <span style="font-family:'IBM Plex Mono',monospace;font-weight:700;color:${it.color}">${it.val}</span>
           </div>`).join('');
       }
+
+      // ตารางกระทบยอดรายประเภทงบ
+      const dtbody = _el('recon-detail-tbody');
+      if (dtbody && walletBreakdown && walletBreakdown.length) {
+        const WTYPES = ['A','B','C','D','E','F'];
+        const wbMap = {};
+        walletBreakdown.forEach(w => { wbMap[w.wtype] = w; });
+        dtbody.innerHTML = WTYPES.map(wt => {
+          const w = wbMap[wt];
+          if (!w || (w.alloc === 0 && w.paidGFMIS === 0 && w.paidDS6 === 0)) return '';
+          const diff = w.paidGFMIS - w.paidDS6;
+          const diffAbs = Math.abs(diff);
+          const isOk = diffAbs <= 1;
+          const diffClr = isOk ? '#0d9488' : diffAbs / Math.max(w.alloc, 1) > 0.05 ? '#e11d48' : '#d97706';
+          const badge = isOk
+            ? '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#d1fae5;color:#065f46">✅ ตรง</span>'
+            : `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${diffAbs/Math.max(w.alloc,1)>0.05?'#fee2e2':'#fef9c3'};color:${diffAbs/Math.max(w.alloc,1)>0.05?'#991b1b':'#854d0e'}">⚠ ต่าง ${fmt(diffAbs)}</span>`;
+          return `<tr>
+            <td><span style="display:inline-block;padding:3px 10px;border-radius:6px;font-weight:800;font-size:13px;background:${w.bg||'#f1f5f9'};color:${w.color||'#475569'}">${wt}</span></td>
+            <td style="font-size:13px">${w.label}</td>
+            <td class="num" style="font-family:'IBM Plex Mono',monospace">${fmt(w.alloc)}</td>
+            <td class="num" style="font-family:'IBM Plex Mono',monospace;color:#2457a0;font-weight:600">${fmt(w.paidGFMIS)}</td>
+            <td class="num" style="font-family:'IBM Plex Mono',monospace;color:#0d9488;font-weight:600">${fmt(w.paidDS6)}</td>
+            <td class="num" style="font-family:'IBM Plex Mono',monospace;color:#7c3aed">${fmt(w.reservedDS6 || 0)}</td>
+            <td class="num" style="font-family:'IBM Plex Mono',monospace;color:${diffClr};font-weight:600">${diff >= 0 ? '+' : ''}${fmt(diff)}</td>
+            <td style="text-align:center">${badge}</td>
+          </tr>`;
+        }).join('');
+      }
     }
+
+    let walletBreakdown = null;
 
     // ════════════════════════════════════════════════
     //  PANEL 3 — ความก้าวหน้ายุทธศาสตร์
@@ -686,15 +1181,39 @@
     function renderGroupTable(data, target) {
       const tbody = document.getElementById('group-tbody');
       tbody.innerHTML = '';
+
+      // KPI summary cards
+      const kpiEl = document.getElementById('group-kpi-cards');
+      if (kpiEl && data && data.length) {
+        const totAlloc    = data.reduce((s, g) => s + (g.allocated || 0), 0);
+        const totPaid     = data.reduce((s, g) => s + (g.paid      || 0), 0);
+        const totReserved = data.reduce((s, g) => s + (g.reserved  || 0), 0);
+        const totRemain   = totAlloc - totPaid - totReserved;
+        kpiEl.innerHTML = [
+          { label:'กันเงินรวมทุกกลุ่ม',   val: fmt(totAlloc),    color:'var(--navy)',  bg:'#f8fafc' },
+          { label:'เบิกจ่ายแล้ว (DS6)',   val: fmt(totPaid),     color:'#0d9488',      bg:'#f0fdfa' },
+          { label:'คงเหลือ (หลังกันเงิน)', val: fmt(totRemain),   color:'#e11d48',      bg:'#fff5f5' },
+        ].map(k => `
+          <div style="background:${k.bg};border-radius:var(--radius);padding:16px 20px;border:1px solid var(--border);border-left:4px solid ${k.color}">
+            <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">${k.label}</div>
+            <div style="font-size:20px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${k.color}">${k.val}</div>
+          </div>`).join('');
+      }
+
       data.forEach(d => {
         const raw = (d.paidPct != null && !isNaN(d.paidPct)) ? Number(d.paidPct) : Number(d.pct || 0);
         const pct = +raw.toFixed(1);
         const alert = pct >= target ? 'green' : pct >= target - 10 ? 'yellow' : 'red';
+        const reserved = d.reserved || 0;
+        const remaining = (d.allocated || 0) - (d.paid || 0) - reserved;
+        const remClr = remaining < 0 ? '#e11d48' : remaining === 0 ? 'var(--text-dim)' : '#0d9488';
         const tr = document.createElement('tr');
         tr.innerHTML = `
       <td><b>${d.label || d.line || '-'}</b></td>
       <td class="num">${fmt(d.allocated)}</td>
-      <td class="num">${fmt(d.paid)}</td>
+      <td class="num" style="color:#0d9488;font-weight:600">${fmt(d.paid)}</td>
+      <td class="num" style="color:#7c3aed">${fmt(reserved)}</td>
+      <td class="num" style="color:${remClr};font-weight:${remaining < 0 ? 700 : 400}">${fmt(remaining)}</td>
       <td>
         <div class="mini-bar-wrap">
           <div class="mini-bar-track">
@@ -830,24 +1349,35 @@
         .getGFInputRows(_selectedYear);
     }
 
+    function _gfDeltaHtml(delta) {
+      if (delta === 0) return '<span style="color:var(--text-dim)">—</span>';
+      const clr = delta > 0 ? '#7c3aed' : '#e11d48';
+      const sign = delta > 0 ? '+' : '';
+      return `<span style="font-weight:600;color:${clr}">${sign}${fmt(delta)}</span>`;
+    }
+
     function _renderGFInputTable(rows) {
       const tbody = document.getElementById('gfinput-tbody');
       const tfoot = document.getElementById('gfinput-tfoot');
       tbody.innerHTML = '';
       if (!rows || !rows.length) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-dim)">ไม่มีข้อมูล — ยังไม่มีแผนงานในปีงบนี้</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text-dim)">ไม่มีข้อมูล — ยังไม่มีแผนงานในปีงบนี้</td></tr>';
         tfoot.innerHTML = '';
         return;
       }
-      let totAlloc = 0, totPO = 0, totPaid = 0, totRemain = 0;
+      let totAlloc = 0, totPO = 0, totPaid = 0, totRemain = 0, totDeltaPO = 0, totDeltaPaid = 0;
 
       rows.forEach((r, idx) => {
         const uid = `gf_${idx}`;
         const remain = r.alloc - r.poNow - r.paidNow;
-        totAlloc  += r.alloc;
-        totPO     += r.poNow;
-        totPaid   += r.paidNow;
-        totRemain += remain;
+        const deltaPO   = r.poNow   - (r.poYest   || 0);
+        const deltaPaid = r.paidNow - (r.paidYest  || 0);
+        totAlloc     += r.alloc;
+        totPO        += r.poNow;
+        totPaid      += r.paidNow;
+        totRemain    += remain;
+        totDeltaPO   += deltaPO;
+        totDeltaPaid += deltaPaid;
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -871,6 +1401,8 @@
               style="width:110px;padding:5px 8px;border:1px solid var(--teal);border-radius:6px;
                      font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right">
           </td>
+          <td class="num" id="${uid}_dpo">${_gfDeltaHtml(deltaPO)}</td>
+          <td class="num" id="${uid}_dpaid">${_gfDeltaHtml(deltaPaid)}</td>
           <td class="num" id="${uid}_remain" style="font-weight:600;color:${remain >= 0 ? 'var(--green)' : 'var(--rose)'}">${fmt(remain)}</td>`;
         tbody.appendChild(tr);
       });
@@ -883,6 +1415,8 @@
           <td></td><td></td>
           <td class="num" id="gf-tot-po" style="padding:10px 12px">${fmt(totPO)}</td>
           <td class="num" id="gf-tot-paid" style="padding:10px 12px">${fmt(totPaid)}</td>
+          <td class="num" id="gf-tot-dpo" style="padding:10px 12px;color:${totDeltaPO>=0?'#c4b5fd':'#fca5a5'}">${totDeltaPO>=0?'+':''}${fmt(totDeltaPO)}</td>
+          <td class="num" id="gf-tot-dpaid" style="padding:10px 12px;color:${totDeltaPaid>=0?'#99f6e4':'#fca5a5'}">${totDeltaPaid>=0?'+':''}${fmt(totDeltaPaid)}</td>
           <td class="num" id="gf-tot-remain" style="padding:10px 12px">${fmt(totRemain)}</td>
         </tr>`;
     }
@@ -893,27 +1427,34 @@
       if (!r) return;
       const po   = parseFloat(document.getElementById(`${uid}_po`).value) || 0;
       const paid = parseFloat(document.getElementById(`${uid}_paid`).value) || 0;
-      const remain = r.alloc - po - paid;
-      const el = document.getElementById(`${uid}_remain`);
-      if (el) {
-        el.textContent = fmt(remain);
-        el.style.color = remain >= 0 ? 'var(--green)' : 'var(--rose)';
-      }
+      const remain   = r.alloc - po - paid;
+      const deltaPO  = po   - (r.poYest   || 0);
+      const deltaPaid= paid - (r.paidYest || 0);
+
+      const elRem = document.getElementById(`${uid}_remain`);
+      if (elRem) { elRem.textContent = fmt(remain); elRem.style.color = remain >= 0 ? 'var(--green)' : 'var(--rose)'; }
+      const elDPO = document.getElementById(`${uid}_dpo`);
+      if (elDPO) elDPO.innerHTML = _gfDeltaHtml(deltaPO);
+      const elDPaid = document.getElementById(`${uid}_dpaid`);
+      if (elDPaid) elDPaid.innerHTML = _gfDeltaHtml(deltaPaid);
+
       // อัป totals
-      let totPO = 0, totPaid = 0, totRemain = 0;
+      let totPO = 0, totPaid = 0, totRemain = 0, totDPO = 0, totDPaid = 0;
       _gfRows.forEach((row, i) => {
-        const p  = parseFloat((document.getElementById(`gf_${i}_po`) || {value: row.poNow}).value) || 0;
+        const p  = parseFloat((document.getElementById(`gf_${i}_po`)   || {value: row.poNow}).value)   || 0;
         const pd = parseFloat((document.getElementById(`gf_${i}_paid`) || {value: row.paidNow}).value) || 0;
         totPO    += p;
         totPaid  += pd;
         totRemain+= row.alloc - p - pd;
+        totDPO   += p  - (row.poYest   || 0);
+        totDPaid += pd - (row.paidYest || 0);
       });
-      const tpo = document.getElementById('gf-tot-po');
-      const tp  = document.getElementById('gf-tot-paid');
-      const tr  = document.getElementById('gf-tot-remain');
-      if (tpo) tpo.textContent = fmt(totPO);
-      if (tp)  tp.textContent  = fmt(totPaid);
-      if (tr)  tr.textContent  = fmt(totRemain);
+      const _upd = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
+      _upd('gf-tot-po', totPO); _upd('gf-tot-paid', totPaid); _upd('gf-tot-remain', totRemain);
+      const tdpo = document.getElementById('gf-tot-dpo');
+      const tdp  = document.getElementById('gf-tot-dpaid');
+      if (tdpo)  { tdpo.textContent = (totDPO >= 0 ? '+' : '') + fmt(totDPO);   tdpo.style.color = totDPO  >= 0 ? '#c4b5fd' : '#fca5a5'; }
+      if (tdp)   { tdp.textContent  = (totDPaid >= 0 ? '+' : '') + fmt(totDPaid); tdp.style.color  = totDPaid >= 0 ? '#99f6e4' : '#fca5a5'; }
     }
 
     function saveGFInputData() {

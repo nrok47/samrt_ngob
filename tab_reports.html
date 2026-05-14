@@ -1,0 +1,193 @@
+    <!-- ════════════════════════════════════════ TAB: REPORTS รายงาน ════ -->
+    <div id="tab-reports" class="tab">
+
+      <!-- ── Controls ── -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#9b8fa8;margin-bottom:4px;font-family:'IBM Plex Mono',monospace">BUDGET REPORT</div>
+          <div style="font-size:20px;font-weight:700;color:#3a3654">รายงานสรุปการเบิกจ่ายงบประมาณ · ปีงบ <span id="rpt-fy">2569</span></div>
+          <div style="font-size:12px;color:#9b8fa8;margin-top:2px;font-family:'IBM Plex Mono',monospace">ศูนย์อนามัยที่ 10 อุบลราชธานี · กรมอนามัย</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div id="rpt-asof" style="font-size:11px;color:#9b8fa8;font-family:'IBM Plex Mono',monospace;text-align:right;line-height:1.6">ณ วันที่ —<br>อัปเดตโดย ทีมการเงิน</div>
+          <button onclick="window.print()" style="padding:8px 16px;background:#3a3654;color:#fff;border:none;border-radius:10px;font-size:12px;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:6px">
+            <i class="fas fa-print"></i> พิมพ์ / PDF
+          </button>
+        </div>
+      </div>
+
+      <!-- ══ SECTION A · KPI Summary Strip ══ -->
+      <div id="rpt-kpi-strip" style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;background:#fff;border:1px solid #ecdfe8;border-radius:14px;overflow:hidden;margin-bottom:18px;box-shadow:0 1px 2px rgba(155,143,168,.06)">
+        <div class="rpt-stat">
+          <div class="rpt-stat-l">งบประมาณรวม (A+B+C+D)</div>
+          <div class="rpt-stat-v" id="rpt-alloc">—</div>
+          <div class="rpt-stat-d">บาท · อนุมัติแล้ว</div>
+        </div>
+        <div class="rpt-stat">
+          <div class="rpt-stat-l">เบิกจ่ายสะสม</div>
+          <div class="rpt-stat-v" id="rpt-paid">—</div>
+          <div class="rpt-stat-d" id="rpt-paid-d">ณ —</div>
+        </div>
+        <div class="rpt-stat">
+          <div class="rpt-stat-l">% เบิกจ่าย / เป้าหมาย</div>
+          <div class="rpt-stat-v" id="rpt-pct" style="color:#3a3654">—%</div>
+          <div class="rpt-stat-d" id="rpt-pct-d">เป้า —%</div>
+        </div>
+        <div class="rpt-stat" style="border-right:none">
+          <div class="rpt-stat-l">คงเหลือ</div>
+          <div class="rpt-stat-v" id="rpt-remain">—</div>
+          <div class="rpt-stat-d" id="rpt-remain-d">งบที่ยังไม่เบิก</div>
+        </div>
+      </div>
+
+      <!-- ══ SECTION B · Hero % + Donut ══ -->
+      <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:14px;margin-bottom:14px">
+
+        <!-- Hero card -->
+        <div style="background:linear-gradient(135deg,#a4c8ec 0%,#f6c1d4 50%,#f9d9a8 100%);border-radius:14px;padding:28px 30px">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:rgba(58,54,84,.65);font-weight:500;margin-bottom:4px">ยอดเบิกจ่ายสะสมรวมทุกงบ</div>
+          <div style="font-size:72px;font-weight:600;letter-spacing:-.03em;line-height:1;font-family:'IBM Plex Mono',monospace;color:#3a3654"><span id="rpt-big-pct">—</span>%</div>
+          <div style="font-size:12px;color:rgba(58,54,84,.75);font-family:'IBM Plex Mono',monospace;margin-top:4px">฿<span id="rpt-big-paid">—</span> จาก ฿<span id="rpt-big-alloc">—</span></div>
+
+          <!-- progress track -->
+          <div style="position:relative;height:14px;background:rgba(255,255,255,.55);margin-top:22px;border-radius:999px;overflow:visible">
+            <div id="rpt-prog-bar" style="position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.85);transition:width .8s ease;border-radius:999px;width:0%"></div>
+            <div id="rpt-prog-marker" style="position:absolute;top:-6px;bottom:-6px;width:2px;background:#3a3654;opacity:.6;left:69%">
+              <div id="rpt-prog-marker-lbl" style="position:absolute;top:-22px;transform:translateX(-50%);font-size:10px;font-family:'IBM Plex Mono',monospace;white-space:nowrap;padding:2px 8px;background:#fff;color:#3a3654;border-radius:999px;box-shadow:0 1px 2px rgba(58,54,84,.12)">เป้า 69%</div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;font-family:'IBM Plex Mono',monospace;opacity:.65;margin-top:8px;color:#3a3654"><span>0%</span><span>50%</span><span>100%</span></div>
+
+          <!-- status pills -->
+          <div style="display:flex;gap:10px;margin-top:18px">
+            <div id="rpt-pill-status" style="flex:1;padding:10px 14px;background:rgba(255,255,255,.55);border-radius:12px">
+              <div style="font-size:10px;opacity:.7;text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px;color:#3a3654">เทียบเป้าหมาย</div>
+              <div id="rpt-pill-status-v" style="font-weight:600;font-family:'IBM Plex Mono',monospace;color:#3a3654;font-size:12px">กำลังโหลด...</div>
+            </div>
+            <div style="flex:1;padding:10px 14px;background:rgba(255,255,255,.55);border-radius:12px">
+              <div style="font-size:10px;opacity:.7;text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px;color:#3a3654">เดือนเป้าหมาย</div>
+              <div id="rpt-pill-month" style="font-weight:600;font-family:'IBM Plex Mono',monospace;color:#3a3654;font-size:12px">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Donut: wallet breakdown -->
+        <div style="background:#fff;border:1px solid #ecdfe8;border-radius:14px;padding:22px 24px;box-shadow:0 1px 2px rgba(155,143,168,.06)">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#9b8fa8;font-weight:500;margin-bottom:14px">สัดส่วนงบตามประเภท</div>
+          <div style="display:grid;grid-template-columns:140px 1fr;gap:18px;align-items:center">
+            <svg id="rpt-donut" viewBox="-1.1 -1.1 2.2 2.2" style="width:100%;transform:rotate(-90deg)"></svg>
+            <div id="rpt-donut-legend" style="font-size:12px;display:flex;flex-direction:column;gap:6px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ SECTION C · RAYSAI Bars รายสายบริหาร ══ -->
+      <div style="background:#fff;border:1px solid #ecdfe8;border-radius:14px;padding:22px 24px;margin-bottom:14px;box-shadow:0 1px 2px rgba(155,143,168,.06)">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:13px;font-weight:600;color:#3a3654">% เบิกจ่าย · รายสายบริหาร</div>
+          <div id="rpt-raysai-meta" style="font-size:11px;color:#9b8fa8;font-family:'IBM Plex Mono',monospace">—</div>
+        </div>
+        <div style="position:relative">
+          <div id="rpt-raysai-bars" style="display:grid;gap:10px;align-items:end;height:200px;padding:10px 0 4px;border-bottom:1px solid #f5ecf2"></div>
+        </div>
+        <div style="display:flex;gap:22px;margin-top:12px;flex-wrap:wrap;font-size:11px;color:#9b8fa8;font-family:'IBM Plex Mono',monospace">
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:#a8d8a0;display:inline-block"></span> ผ่านเป้า</span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:#a4c8ec;display:inline-block"></span> ใกล้เคียง (±10%)</span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:#ef9a8a;display:inline-block"></span> ต่ำกว่าเป้า</span>
+        </div>
+      </div>
+
+      <!-- ══ SECTION D · Monthly Chart + Watchlist ══ -->
+      <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:14px;margin-bottom:14px">
+
+        <!-- Monthly bar chart (WireframeC style) -->
+        <div style="background:#fff;border:1px solid #ecdfe8;border-radius:14px;padding:22px 24px;box-shadow:0 1px 2px rgba(155,143,168,.06)">
+          <div style="font-size:13px;font-weight:600;color:#3a3654;margin-bottom:4px">การเบิกจ่ายรายเดือน</div>
+          <div style="font-size:11px;color:#9b8fa8;margin-bottom:14px">เปรียบเทียบเป้าหมายสะสม vs ผลจริงสะสม</div>
+          <div id="rpt-monthly-chart" style="display:flex;gap:6px;align-items:flex-end;height:160px;overflow-x:auto;padding-bottom:4px"></div>
+          <div style="display:flex;gap:6px;font-size:10px;font-family:'IBM Plex Mono',monospace;margin-top:8px;flex-wrap:wrap" id="rpt-monthly-labels"></div>
+          <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:#9b8fa8">
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:5px;background:#e2e8f0;border-radius:2px;display:inline-block"></span>เป้าหมายสะสม</span>
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:5px;background:#0d9488;border-radius:2px;display:inline-block"></span>เบิกจ่ายสะสม</span>
+          </div>
+        </div>
+
+        <!-- Watchlist (WireframeC style) -->
+        <div style="background:#fff;border:1px solid #ecdfe8;border-radius:14px;padding:22px 24px;box-shadow:0 1px 2px rgba(155,143,168,.06)">
+          <div style="font-size:13px;font-weight:600;color:#3a3654;margin-bottom:4px">รายการเฝ้าระวัง</div>
+          <div style="font-size:11px;color:#9b8fa8;margin-bottom:14px">สายบริหารที่ต้องติดตาม</div>
+          <div id="rpt-watchlist" style="display:flex;flex-direction:column;gap:8px"></div>
+        </div>
+      </div>
+
+      <!-- ══ SECTION E · Wallet Breakdown Table (WireframeB) ══ -->
+      <div style="background:#fff;border:1px solid #ecdfe8;border-radius:14px;overflow:hidden;margin-bottom:14px;box-shadow:0 1px 2px rgba(155,143,168,.06)">
+        <div style="padding:16px 22px;border-bottom:1px solid #ecdfe8;display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:13px;font-weight:600;color:#3a3654">รายละเอียดตามประเภทงบ</div>
+          <div style="font-size:11px;color:#9b8fa8;font-family:'IBM Plex Mono',monospace">แหล่งที่มา · กันเงิน DS6</div>
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:#fbf4f7">
+                <th style="padding:10px 18px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:#9b8fa8;font-weight:600;white-space:nowrap">ประเภท</th>
+                <th style="padding:10px 18px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:#9b8fa8;font-weight:600">ชื่อ</th>
+                <th style="padding:10px 18px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:#9b8fa8;font-weight:600;white-space:nowrap">งบจัดสรร</th>
+                <th style="padding:10px 18px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:#9b8fa8;font-weight:600;white-space:nowrap">เบิกจ่าย</th>
+                <th style="padding:10px 18px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:#9b8fa8;font-weight:600;white-space:nowrap">คงเหลือ</th>
+                <th style="padding:10px 18px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:#9b8fa8;font-weight:600">%</th>
+                <th style="padding:10px 18px;font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:#9b8fa8;font-weight:600">ความคืบหน้า</th>
+                <th style="padding:10px 18px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:#9b8fa8;font-weight:600">สถานะ</th>
+              </tr>
+            </thead>
+            <tbody id="rpt-wallet-tbody"></tbody>
+            <tfoot id="rpt-wallet-tfoot"></tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- ══ SECTION F · Alert List (WireframeA) ══ -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px">
+        <div style="background:#fff;border:1px solid #ecdfe8;border-radius:14px;padding:22px 24px;box-shadow:0 1px 2px rgba(155,143,168,.06)">
+          <div style="font-size:13px;font-weight:600;color:#3a3654;margin-bottom:14px">ประเด็นที่ต้องดู</div>
+          <div id="rpt-alerts" style="display:flex;flex-direction:column;gap:8px"></div>
+        </div>
+        <div style="background:#fff;border:1px solid #ecdfe8;border-radius:14px;padding:22px 24px;box-shadow:0 1px 2px rgba(155,143,168,.06)">
+          <div style="font-size:13px;font-weight:600;color:#3a3654;margin-bottom:14px">บทสรุปสำหรับผู้บริหาร</div>
+          <div id="rpt-summary-text" style="font-size:12px;color:#3a3654;line-height:1.8"></div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div style="display:flex;justify-content:space-between;padding-top:14px;border-top:1px solid #ecdfe8;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#9b8fa8;margin-bottom:8px">
+        <span>SMART-BUDGET · ศอ.10 · GFMIS sync · v2.0</span>
+        <span id="rpt-footer-time">—</span>
+      </div>
+
+      <!-- Print CSS -->
+      <style>
+        .rpt-stat { padding:18px 22px;border-right:1px solid #ecdfe8;display:flex;flex-direction:column; }
+        .rpt-stat-l { font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:#9b8fa8;font-weight:500; }
+        .rpt-stat-v { font-size:24px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.02em;margin-top:6px;line-height:1.05;color:#3a3654; }
+        .rpt-stat-d { font-size:11px;font-family:'IBM Plex Mono',monospace;color:#9b8fa8;margin-top:4px; }
+        .rpt-watch-item { display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:10px;gap:10px; }
+        .rpt-watch-item .rpt-wi-nm { font-size:12px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+        .rpt-watch-item .rpt-wi-pct { font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:13px;flex-shrink:0; }
+        .rpt-watch-item .rpt-wi-desc { font-size:11px;opacity:.75;flex-shrink:0; }
+        .rpt-alert-item { padding:10px 12px;border-left:3px solid #a4c8ec;background:#f5ecf2;border-radius:0 6px 6px 0;font-size:12px;line-height:1.55; }
+        .rpt-alert-item.warn { border-left-color:#f9d9a8;background:#fdf6ea; }
+        .rpt-alert-item.alert { border-left-color:#ef9a8a;background:#fdf0eb; }
+        .rpt-alert-item b { display:block;margin-bottom:2px;font-weight:600;color:#3a3654; }
+        @media print {
+          #tab-reports .nav-btn, button { display:none !important; }
+          #tab-reports { padding:0 !important; }
+          body { background:white !important; }
+        }
+        @media (max-width:900px) {
+          #rpt-kpi-strip { grid-template-columns:1fr 1fr !important; }
+          #tab-reports > div:nth-child(3),
+          #tab-reports > div:nth-child(5) { grid-template-columns:1fr !important; }
+          #tab-reports > div:nth-child(6) { grid-template-columns:1fr !important; }
+        }
+      </style>
+    </div>

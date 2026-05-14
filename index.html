@@ -136,6 +136,10 @@
     <button class="nav-btn" onclick="switchTab('transfer', this)">
       <i class="fas fa-exchange-alt"></i> รอบโอนงบ
     </button>
+    <button type="button" class="nav-btn" onclick="switchTab('reports', this)"
+      style="color:#0d9488;border-bottom-color:transparent" title="รายงานต่างๆ">
+      <i class="fas fa-file-alt"></i> รายงาน
+    </button>
     <button class="nav-btn" onclick="switchTab('exec', this)"
       style="margin-left:auto;color:#7c3aed;border-bottom-color:transparent" title="Dashboard สำหรับผู้บริหาร">
       <i class="fas fa-crown"></i> สรุปผู้บริหาร
@@ -153,6 +157,7 @@
     <?!= include('tab_admin'); ?>
     <?!= include('tab_plan'); ?>
     <?!= include('tab_transfer'); ?>
+    <?!= include('tab_reports'); ?>
   </div>
 
   <?!= include('scripts'); ?>

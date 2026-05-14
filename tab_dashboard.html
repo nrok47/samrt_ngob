@@ -25,106 +25,103 @@
            PANEL 1 · ภาพรวมผู้บริหาร — Executive Overview
       ══════════════════════════════════════════════════════ -->
       <div id="dshpanel-overview">
-        <!-- Section 1: Main KPI Dashboard -->
-        <section class="grid grid-cols-12 gap-8 items-start mb-8">
-          <!-- Large Gauge Card -->
-          <div class="col-span-12 lg:col-span-7 bg-white rounded-3xl p-10 flex flex-col items-center justify-center relative overflow-hidden shadow-sm border border-slate-100">
-            <div class="absolute top-0 right-0 p-8 opacity-[0.03]">
-              <i class="fas fa-wallet text-9xl"></i>
-            </div>
-            <div class="text-center mb-8">
-              <h3 class="text-2xl font-bold text-[#002046] tracking-tight">ยอดเบิกจ่ายสะสม ปีงบประมาณ <span id="fiscal-year-label">2569</span></h3>
-              <p class="text-slate-500 font-medium">ภาพรวมทุกกระเป๋างบประมาณ เทียบเป้าหมายการเบิกจ่าย</p>
-            </div>
-            
-            <!-- Asymmetric Gauge Representation -->
-            <div class="relative w-80 h-44 flex items-end justify-center mb-10">
-              <svg class="w-full h-full transform" viewBox="0 0 100 50">
-                <path d="M10,50 A40,40 0 0,1 90,50" fill="none" stroke="#e0e3e5" stroke-linecap="round" stroke-width="8"></path>
-                <path id="ring-paid" d="M10,50 A40,40 0 0,1 90,50" fill="none" stroke="url(#gaugeGradient)" stroke-linecap="round" stroke-width="10" stroke-dasharray="125" stroke-dashoffset="125" style="transition: stroke-dashoffset 1.2s ease;"></path>
-                <defs>
-                  <linearGradient id="gaugeGradient" x1="0%" x2="100%" y1="0%" y2="0%">
-                    <stop offset="0%" style="stop-color:#002046"></stop>
-                    <stop offset="100%" style="stop-color:#0d9488"></stop>
-                  </linearGradient>
-                </defs>
-              </svg>
-              <div class="absolute bottom-0 text-center">
-                <span class="text-6xl font-black text-[#002046] tracking-tighter" id="ring-pct-text">0%</span>
-                <div class="flex items-center justify-center gap-1 text-teal-600 mt-1">
-                 <!--  <span class="material-symbols-outlined text-sm font-bold" data-icon="trending_up">trending_up</span> -->
-                  <i class="fas fa-chart-line text-sm border-0"></i>
-                  <span class="text-sm font-bold" id="progress-desc">กำลังโหลด...</span>
-                </div>
+        <!-- Section 1: ภาพรวมเบิกจ่าย — Pastel Design -->
+        <div class="dv2-sec-head" style="margin-bottom:14px">
+          <h2><span class="dv2-badge">A</span> เบิกจ่ายงบประมาณ · ปีงบประมาณ <span id="fiscal-year-label">2569</span></h2>
+          <div class="dv2-meta" id="dv2-sync-meta">ที่มา · GFMIS · รายสายบริหาร</div>
+        </div>
+
+        <div class="dv2-grid" style="margin-bottom:22px">
+
+          <!-- HERO: overall % with target marker -->
+          <div class="dv2-card dv2-hero">
+            <h3>ยอดเบิกจ่ายสะสมรวมทุกงบ</h3>
+            <div class="dv2-big"><span id="dv2-hero-pct">—</span>%</div>
+            <div class="dv2-sub">฿<span id="dv2-hero-paid">—</span> จาก ฿<span id="dv2-hero-alloc">—</span></div>
+
+            <div class="dv2-target-track">
+              <i id="dv2-heroBar" style="width:0%"></i>
+              <div class="dv2-target-marker" id="dv2-marker-t" style="left:69%">
+                <div class="dv2-marker-lbl" id="dv2-marker-t-lbl">เป้า 69%</div>
               </div>
             </div>
-            
-            <div class="grid grid-cols-3 gap-6 w-full mt-4">
-              <div class="text-center bg-slate-50 rounded-xl p-3 border border-slate-100">
-                <p class="text-[10px] uppercase font-bold text-slate-500 tracking-widest mb-1">งบจัดสรรรวม (A+B+C)</p>
-                <p class="text-xl font-bold text-[#002046] font-mono" id="kpi-allocated">—</p>
+            <div class="dv2-target-axis"><span>0%</span><span>50%</span><span>100%</span></div>
+
+            <div class="dv2-hero-status">
+              <div class="dv2-status-pill" id="dv2-pill-target">
+                <div class="dv2-pill-lbl">เป้าหมายเดือนนี้ · <span id="dv2-pill-target-pct">—</span>%</div>
+                <div class="dv2-pill-v" id="dv2-pill-target-v">กำลังโหลด...</div>
               </div>
-              <div class="text-center bg-teal-50 rounded-xl p-3 border border-teal-100">
-                <p class="text-[10px] uppercase font-bold text-teal-700 tracking-widest mb-1">เบิกจ่ายสะสม (DS6)</p>
-                <p class="text-xl font-bold text-teal-700 font-mono" id="kpi-paid">—</p>
-              </div>
-              <div class="text-center bg-slate-50 rounded-xl p-3 border border-slate-100">
-                 <p class="text-[10px] uppercase font-bold text-slate-500 tracking-widest mb-1">เป้าหมายตามเกณฑ์</p>
-                 <div class="w-full h-1.5 bg-slate-200 rounded-full mt-2 overflow-hidden mb-1"><div id="pbar-target" class="h-full bg-slate-400" style="width:0%"></div></div>
-                 <p class="text-sm font-bold text-slate-700" id="pbar-target-val">0%</p>
-                 <!-- hide pbar-paid elements as gauge handles it, but keep IDs for scripts -->
-                 <div id="pbar-paid" style="display:none;"></div><div id="pbar-paid-val" style="display:none;">0%</div>
-                 <circle id="ring-target" style="display:none;"></circle>
+              <div class="dv2-status-pill">
+                <div class="dv2-pill-lbl">เดือนเป้าหมาย</div>
+                <div class="dv2-pill-v" id="dv2-pill-month">—</div>
               </div>
             </div>
           </div>
 
-          <!-- Status Cards Stack -->
-          <div class="col-span-12 lg:col-span-5 space-y-5">
-            <!-- PO Card -->
-            <div class="bg-amber-50 rounded-2xl p-6 flex justify-between items-center border border-amber-100 shadow-sm relative overflow-hidden group">
-              <div class="absolute right-0 top-0 bottom-0 w-2 bg-amber-400"></div>
-              <div class="flex items-center gap-5">
-                <div class="w-14 h-14 rounded-2xl bg-amber-100 flex items-center justify-center text-amber-600 group-hover:scale-110 transition-transform">
-                  <i class="fas fa-file-invoice-dollar text-2xl"></i>
-                </div>
-                <div>
-                  <h4 class="font-bold text-amber-900">ยอด PO / กันเงิน</h4>
-                  <p class="text-xs text-amber-700/70 mt-1">ทุกสถานะ <b>ยกเว้นยกเลิก</b></p>
-                </div>
-              </div>
-              <div class="text-right mr-4">
-                <p class="text-2xl font-black text-amber-600 font-mono" id="kpi-po">—</p>
-              </div>
+          <!-- KPI strip -->
+          <div class="dv2-card dv2-kpi">
+            <div class="dv2-kpi-cell">
+              <div class="dv2-kpi-lbl">งบดำเนินงาน (A)</div>
+              <div class="dv2-kpi-v"><span id="dv2-kpi-op-pct">—</span>%</div>
+              <div class="dv2-kpi-d" id="dv2-kpi-op-amt">—</div>
+              <div class="dv2-badge-row"><span class="dv2-new-badge dv2-muted" id="dv2-kpi-op-badge">—</span></div>
             </div>
-
-            <!-- Remaining Card -->
-            <div class="bg-rose-50 rounded-2xl p-6 flex justify-between items-center border border-rose-100 shadow-sm relative overflow-hidden group">
-              <div class="absolute right-0 top-0 bottom-0 w-2 bg-rose-400"></div>
-              <div class="flex items-center gap-5">
-                <div class="w-14 h-14 rounded-2xl bg-rose-100 flex items-center justify-center text-rose-600 group-hover:scale-110 transition-transform">
-                  <i class="fas fa-piggy-bank text-2xl"></i>
-                </div>
-                <div>
-                  <h4 class="font-bold text-rose-900">คงเหลือ GFMIS</h4>
-                  <p class="text-xs text-rose-700/70 mt-1">งบประมาณที่ยังไม่เบิก/กันเงิน</p>
-                </div>
-              </div>
-              <div class="text-right mr-4">
-                <p class="text-2xl font-black text-rose-600 font-mono" id="kpi-remaining">—</p>
-              </div>
+            <div class="dv2-kpi-cell">
+              <div class="dv2-kpi-lbl">งบลงทุน (C+F)</div>
+              <div class="dv2-kpi-v" id="dv2-kpi-inv-v"><span id="dv2-kpi-inv-pct">—</span>%</div>
+              <div class="dv2-kpi-d" id="dv2-kpi-inv-amt">—</div>
+              <div class="dv2-badge-row"><span class="dv2-new-badge dv2-muted" id="dv2-kpi-inv-badge">—</span></div>
             </div>
-
-            <!-- Breakdown bar -->
-            <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
-              <div class="text-sm font-bold text-[#002046] mb-3 flex items-center gap-2"><i class="fas fa-layer-group text-slate-400"></i> สัดส่วนงบตามประเภทกระเป๋า</div>
-              <div id="type-breakdown" style="display:flex;flex-direction:column;gap:10px;"></div>
+            <div class="dv2-kpi-cell">
+              <div class="dv2-kpi-lbl">อัปเดตล่าสุด</div>
+              <div class="dv2-kpi-v" style="font-size:15px;margin-top:8px;line-height:1.4" id="dv2-kpi-lastupdate">—</div>
+              <div class="dv2-kpi-d" id="dv2-kpi-rowcount">—</div>
+              <div class="dv2-badge-row"><span class="dv2-new-badge dv2-muted">GFMIS</span></div>
             </div>
           </div>
-        </section>
-        
+
+          <!-- RAYSAI bars: รายสายบริหาร -->
+          <div class="dv2-card dv2-raysai">
+            <div class="dv2-sec-head" style="margin:0 0 8px">
+              <h3 style="font-size:13px;font-weight:600;color:#3a3654">% เบิกจ่าย · รายสายบริหาร</h3>
+              <div class="dv2-meta" id="dv2-raysai-meta">เปรียบเทียบเป้าหมาย</div>
+            </div>
+            <div class="dv2-raysai-wrap">
+              <div class="dv2-raysai-bars" id="dv2RaysaiBars">
+                <div style="color:#9b8fa8;font-size:12px;display:flex;align-items:center;height:100%">กำลังโหลด...</div>
+              </div>
+            </div>
+            <div class="dv2-raysai-foot">
+              <span><span class="dv2-sw" style="background:#a8d8a0"></span> ผ่านเป้า</span>
+              <span><span class="dv2-sw" style="background:#a4c8ec"></span> ใกล้เคียง (±10%)</span>
+              <span><span class="dv2-sw" style="background:#ef9a8a"></span> ต่ำกว่าเป้า</span>
+              <span style="margin-left:auto;font-size:10px">เส้นประ = เป้าหมาย</span>
+            </div>
+          </div>
+
+        </div><!-- /dv2-grid -->
+
+        <!-- hidden IDs ที่ scripts.html ยังใช้อยู่ -->
+        <span id="kpi-allocated" style="display:none"></span>
+        <span id="kpi-paid" style="display:none"></span>
+        <span id="progress-desc" style="display:none"></span>
+        <span id="last-update" style="display:none"></span>
+
+        <!-- Dummy gauge elements (ให้ script เดิมไม่ error) -->
+        <svg style="display:none">
+          <path id="ring-paid"></path>
+          <circle id="ring-target"></circle>
+        </svg>
+        <div id="pbar-paid" style="display:none"></div>
+        <div id="pbar-paid-val" style="display:none"></div>
+        <div id="pbar-target" style="display:none"></div>
+        <div id="pbar-target-val" style="display:none"></div>
+        <div id="type-breakdown" style="display:none"></div>
+
+
         <!-- Monthly Trend -->
-        <div class="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm mb-6">
+        <div class="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm mb-4">
           <div class="text-lg font-bold text-[#002046] flex items-center justify-between mb-4">
             <div class="flex items-center gap-2"><i class="fas fa-chart-line text-teal-600 border-0"></i> แนวโน้มเบิกจ่ายสะสม vs เป้าหมายรายเดือน</div>
           </div>
@@ -134,6 +131,30 @@
             <span class="text-slate-400">(เขียว = ผ่านเป้า · ส้ม = ใกล้เคียง · แดง = ต่ำกว่าเป้า)</span>
           </div>
           <div id="dash-trend" class="flex gap-1 items-end overflow-x-auto pb-2 min-h-[160px] no-scrollbar"></div>
+        </div>
+
+        <!-- Monthly Breakdown Table -->
+        <div class="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm mb-6">
+          <div class="text-lg font-bold text-[#002046] mb-4 flex items-center gap-2">
+            <i class="fas fa-table text-slate-400"></i> ยอดเบิกจ่ายรายเดือน + คงเหลือสะสม
+          </div>
+          <div style="overflow-x:auto">
+            <table class="data-table" id="monthly-table">
+              <thead>
+                <tr>
+                  <th>เดือน</th>
+                  <th class="num">เบิกจ่าย (เดือนนี้)</th>
+                  <th class="num">เบิกจ่ายสะสม</th>
+                  <th class="num" style="color:#7c3aed">% สะสม</th>
+                  <th class="num" style="color:var(--text-dim)">เป้าสะสม %</th>
+                  <th>เทียบเป้า</th>
+                </tr>
+              </thead>
+              <tbody id="monthly-tbody">
+                <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-dim)">กำลังโหลด...</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div><!-- /dshpanel-overview -->
 
@@ -170,6 +191,30 @@
           รายการเบิกแทนกัน ค่ารักษาพยาบาล เงินช่วยพิเศษบำนาญ:
           <span id="reconcile-total" style="font-family:'IBM Plex Mono',monospace;color:var(--navy)">—</span> บาท
           · ใช้เพื่อกระทบยอดกับกรมบัญชีกลาง ไม่รวมในงบประมาณ
+        </div>
+
+        <!-- ตารางกระทบยอดรายประเภทงบ A-F -->
+        <div class="table-card" style="margin-bottom:18px">
+          <div style="padding:14px 20px;border-bottom:1px solid var(--border);font-size:14px;font-weight:700;color:var(--navy)">
+            <i class="fas fa-balance-scale"></i> กระทบยอดรายประเภทงบ (GFMIS vs กันเงิน DS6)
+          </div>
+          <div style="overflow-x:auto">
+            <table class="data-table" id="recon-detail-table">
+              <thead>
+                <tr>
+                  <th style="width:60px">ประเภท</th>
+                  <th>ชื่อ</th>
+                  <th class="num">งบจัดสรร</th>
+                  <th class="num" style="color:#2457a0">เบิก GFMIS</th>
+                  <th class="num" style="color:#0d9488">กันเงิน DS6 (เบิกแล้ว)</th>
+                  <th class="num" style="color:#7c3aed">กันเงิน DS6 (รอเบิก)</th>
+                  <th class="num">ผลต่าง GF−DS6</th>
+                  <th style="text-align:center">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody id="recon-detail-tbody"></tbody>
+            </table>
+          </div>
         </div>
 
         <!-- Admin Line Chart (DS5) -->
@@ -268,18 +313,22 @@
         <div class="section-head">
           <div>
             <div class="section-title">รายละเอียดตามกลุ่มงาน</div>
-            <div class="section-meta">จัดสรร · เบิกจ่าย · ความคืบหน้าตาม DS5</div>
+            <div class="section-meta">ยอดกันเงิน · เบิกจ่าย · คงเหลือ จากสมุดกันเงิน (DS6)</div>
           </div>
         </div>
+        <!-- KPI cards รวมกลุ่ม -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px" id="group-kpi-cards"></div>
         <div class="table-card">
           <div style="overflow-x:auto">
             <table class="data-table" id="group-table">
               <thead>
                 <tr>
-                  <th>กลุ่มงาน / สาย</th>
-                  <th style="text-align:right">จัดสรร (บาท)</th>
-                  <th style="text-align:right">เบิกจ่าย (บาท)</th>
-                  <th>ความคืบหน้า</th>
+                  <th>กลุ่มงาน</th>
+                  <th class="num">กันเงินรวม (บาท)</th>
+                  <th class="num" style="color:#0d9488">เบิกจ่ายแล้ว</th>
+                  <th class="num" style="color:#7c3aed">รอเบิก</th>
+                  <th class="num" style="color:#e11d48">คงเหลือ</th>
+                  <th>% เบิกจ่าย</th>
                   <th>สถานะ</th>
                 </tr>
               </thead>
