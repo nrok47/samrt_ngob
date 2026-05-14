@@ -2491,6 +2491,17 @@ function updateActivity(activityId, payload, fiscalYear) {
       if (oldFy) _syncActivitiesToDS5(oldFy);
       if (newFy && newFy !== oldFy) _syncActivitiesToDS5(newFy);
       if (fy && fy !== oldFy && fy !== newFy) _syncActivitiesToDS5(fy);
+      // บันทึก UPDATE transaction → DS1
+      const txShUpd = ss.getSheetByName('DS1_Transactions');
+      if (txShUpd) {
+        const txId = 'UPD' + Utilities.getUuid().substring(0,8).toUpperCase();
+        txShUpd.appendRow([txId, dateStr, newRow[10]||'', newRow[9]||'', newRow[16]||'',
+          'UPDATE', _oldBudget, v.budget, v.budget - _oldBudget,
+          _oldPaid, v.paid, 0,
+          Session.getActiveUser().getEmail()||'system',
+          `แก้ไข: ${newRow[4]} | status: ${_oldStatus}→${newRow[7]}`, '',
+          activityId, 'Updated']);
+      }
       _log('DS6','UPDATE',`${activityId} ${newRow[4]} | prev budget=${_oldBudget} paid=${_oldPaid} status=${_oldStatus} -> budget=${v.budget} paid=${v.paid} status=${newRow[7]}`);
       return { success:true };
     }
@@ -2734,6 +2745,15 @@ function settleActivity(activityId, actualPaid, fiscalYear, note) {
           Session.getActiveUser().getEmail()||'system',
           `ล้างหนี้: ${data[i][4]}${note ? ' | '+note : ''} (คืน ฿${leftover.toLocaleString()})`,
           '', activityId, 'Settled']);
+        // mark RESERVE row เดิมใน DS1 → Settled (ไม่ต้อง join เวลา query)
+        const ds1Data = txSh.getDataRange().getValues();
+        for (let j = 1; j < ds1Data.length; j++) {
+          if (String(ds1Data[j][15]) === String(activityId) &&
+              String(ds1Data[j][16]) === 'Reserved') {
+            txSh.getRange(j+1, 17).setValue('Settled');
+            break;
+          }
+        }
       }
       _log('DS6','SETTLE',`${activityId} ${data[i][4]} | reserved=${reserved} prevPaid=${prevPaid} actualPaid=${finalPaid} leftover=${leftover}${note ? ' note='+note : ''}`);
       return { success:true, activityId, reserved, actualPaid:finalPaid, leftover,
