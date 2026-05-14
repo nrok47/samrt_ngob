@@ -709,6 +709,7 @@ function setupSheets() {
       'TX_ID','วันที่','รหัสงบประมาณ','แผนงาน','Wallet_Type',
       'ประเภท_TX','ยอดก่อน','ยอดหลัง','ผลต่าง',
       'PO_ก่อน','PO_หลัง','คงเหลือ_GFMIS','ผู้บันทึก','หมายเหตุ','Batch_ID',
+      'Activity_ID','Status',
     ],
     DS2_MasterBudget: [
       'Budget_ID','แผนงาน','รหัสงบประมาณ_20หลัก','สายบริหาร_GFMIS',
@@ -2286,6 +2287,83 @@ function _bootstrapActivitiesFromTransactions(fiscalYear) {
   return appendRows.length;
 }
 
+// ─── ตรวจงบ 2 ชั้น: (1) วงเงินกิจกรรมใน DS6  (2) คงเหลือหมวดรายจ่ายใน DS2 ────
+function _checkBudget2Layer(activityId, budgetCode, requestAmount, fiscalYear) {
+  const fy     = fiscalYear ? Number(fiscalYear) : CONFIG.FISCAL_YEAR;
+  const amount = _n(requestAmount);
+  if (amount <= 0) return { ok: true };
+  const ss = _ss();
+
+  // ชั้น 1 — วงเงินกิจกรรม (DS6)
+  if (activityId) {
+    const ds6 = ss.getSheetByName('DS6_Activities').getDataRange().getValues();
+    for (let i = 1; i < ds6.length; i++) {
+      if (String(ds6[i][0]) !== String(activityId)) continue;
+      if (_isTrue(ds6[i][11])) break;
+      const actRemain = _r(_n(ds6[i][5]) - _n(ds6[i][6]));
+      if (actRemain < amount)
+        return { ok:false, layer:1,
+          message:`วงเงินกิจกรรมไม่พอ — คงเหลือ ฿${actRemain.toLocaleString()} ต้องการ ฿${amount.toLocaleString()}` };
+      break;
+    }
+  }
+
+  // ชั้น 2 — หมวดรายจ่ายรวม (DS2_MasterBudget)
+  if (budgetCode) {
+    const normCode = _normCode(budgetCode);
+    const ds2 = ss.getSheetByName('DS2_MasterBudget').getDataRange().getValues();
+    for (let i = 1; i < ds2.length; i++) {
+      if (_normCode(String(ds2[i][C2.CODE]||'')) !== normCode) continue;
+      if (Number(ds2[i][C2.FISCAL_YEAR]) !== fy) continue;
+      const budgetRemain = _n(ds2[i][C2.REMAIN]);
+      if (budgetRemain < amount)
+        return { ok:false, layer:2,
+          message:`งบหมวดรายจ่ายไม่พอ — รหัส ${budgetCode} คงเหลือ ฿${budgetRemain.toLocaleString()} ต้องการ ฿${amount.toLocaleString()}` };
+      break;
+    }
+  }
+
+  return { ok: true };
+}
+
+// ─── Cascading Dropdown: โครงการ → กิจกรรม → รหัสงบ (สำหรับ Web UI) ────────
+function getCascadingDropdownData(fiscalYear) {
+  try {
+    const fy  = fiscalYear ? Number(fiscalYear) : CONFIG.FISCAL_YEAR;
+    const ss  = _ss();
+    const ds6 = ss.getSheetByName('DS6_Activities').getDataRange().getValues().slice(1);
+
+    const projMap = {};
+    ds6.forEach(r => {
+      if (_isTrue(r[11])) return;
+      if (_fiscalYearFromDateValue(r[1]) !== fy) return;
+      const proj = String(r[9] || 'ไม่ระบุโครงการ').trim();
+      if (!projMap[proj]) projMap[proj] = [];
+      projMap[proj].push({
+        id:         String(r[0]),
+        name:       String(r[4] || ''),
+        group:      String(r[2] || ''),
+        adminLine:  String(r[3] || ''),
+        budgetCode: String(r[10] || ''),
+        wtype:      String(r[16] || ''),
+        budget:     _n(r[5]),
+        paid:       _n(r[6]),
+        remaining:  _r(_n(r[5]) - _n(r[6])),
+        status:     String(r[7] || ''),
+      });
+    });
+
+    const projects = Object.entries(projMap).map(([name, activities]) => ({
+      name,
+      activities: activities.sort((a, b) => b.remaining - a.remaining),
+    }));
+
+    return { success: true, fiscalYear: fy, projects };
+  } catch(e) {
+    return { success: false, message: e.message };
+  }
+}
+
 function createActivity(payload, fiscalYear) {
   const lock = LockService.getScriptLock();
   try {
@@ -2297,6 +2375,11 @@ function createActivity(payload, fiscalYear) {
     const ds6 = ss.getSheetByName('DS6_Activities');
     _ensureDs6Schema(ds6);
     const fy  = fiscalYear ? Number(fiscalYear) : CONFIG.FISCAL_YEAR;
+    // ตรวจ 2 ชั้น ก่อนบันทึก
+    if (v.budget > 0) {
+      const check = _checkBudget2Layer(null, String(p.budgetCode||'').trim(), v.budget, fy);
+      if (!check.ok) return { success:false, message:check.message };
+    }
     const dateStr = _toYmd(p.date || _now().substring(0,10));
     const map = _defaultAdminLineMap();
     const group = String(p.group || '').trim();
@@ -2322,6 +2405,15 @@ function createActivity(payload, fiscalYear) {
     ];
     ds6.appendRow(row);
     _syncActivitiesToDS5(fy);
+    // บันทึก RESERVE transaction → DS1 (ledger กลาง)
+    const txSh = ss.getSheetByName('DS1_Transactions');
+    if (txSh) {
+      const txId = 'RSV' + Utilities.getUuid().substring(0,8).toUpperCase();
+      txSh.appendRow([txId, dateStr, row[10]||'', row[9]||'', row[16]||'',
+        'RESERVE', 0, v.budget, v.budget, 0, 0, 0,
+        Session.getActiveUser().getEmail()||'system',
+        `กันเงิน: ${row[4]}`, '', actId, 'Reserved']);
+    }
     _log('DS6','CREATE',`${actId} ${row[4]}`);
     return { success:true, id:actId };
   } catch (e) {
@@ -2615,6 +2707,17 @@ function settleActivity(activityId, actualPaid, fiscalYear, note) {
       ds6.getRange(i+1, 8).setValue('เบิกจ่ายแล้ว');
       const fy = fiscalYear ? Number(fiscalYear) : _fiscalYearFromDateValue(data[i][1]);
       _syncActivitiesToDS5(fy);
+      // บันทึก SETTLE transaction → DS1
+      const txSh = ss.getSheetByName('DS1_Transactions');
+      if (txSh) {
+        const txId = 'STL' + Utilities.getUuid().substring(0,8).toUpperCase();
+        const dateStr = _toYmd(data[i][1]);
+        txSh.appendRow([txId, dateStr, String(data[i][10]||''), String(data[i][9]||''), String(data[i][16]||''),
+          'SETTLE', reserved, finalPaid, -(reserved - finalPaid), 0, 0, leftover,
+          Session.getActiveUser().getEmail()||'system',
+          `ล้างหนี้: ${data[i][4]}${note ? ' | '+note : ''} (คืน ฿${leftover.toLocaleString()})`,
+          '', activityId, 'Settled']);
+      }
       _log('DS6','SETTLE',`${activityId} ${data[i][4]} | reserved=${reserved} prevPaid=${prevPaid} actualPaid=${finalPaid} leftover=${leftover}${note ? ' note='+note : ''}`);
       return { success:true, activityId, reserved, actualPaid:finalPaid, leftover,
                message:`ล้างหนี้สำเร็จ | ใช้จริง ฿${finalPaid.toLocaleString()} เงินคืน ฿${leftover.toLocaleString()}` };
