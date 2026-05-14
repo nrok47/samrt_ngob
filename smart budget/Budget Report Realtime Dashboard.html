@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<title>ศอ.10 · Dashboard เบิกจ่ายงบประมาณ + เงินบำรุง</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #3a3654;          /* soft plum-ink (อ่านง่าย ไม่แก่) */
+    --paper: #ffffff;
+    --bg: #fdf6f9;           /* blush pastel bg */
+    --line: #ecdfe8;
+    --line-soft: #f5ecf2;
+    --muted: #9b8fa8;
+    --soft: #fbf4f7;
+    --accent: #7cc5b7;       /* pastel mint */
+    --accent-2: #a4c8ec;     /* pastel sky */
+    --accent-3: #f6c1d4;     /* pastel pink */
+    --accent-4: #f9d9a8;     /* pastel peach */
+    --over: #ef9a8a;         /* pastel coral */
+    --under: #a8d8a0;        /* pastel sage */
+    --warn: #f5cf85;         /* pastel buttercup */
+    --hl: #e8f5f1;
+    --pass: #a8d8a0;
+    --fail: #ef9a8a;
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); font-family: 'IBM Plex Sans Thai', sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+  * { box-sizing: border-box; }
+  .num { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+
+  .shell { max-width: 1440px; margin: 0 auto; padding: 24px 28px 60px; }
+
+  /* topbar */
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding-bottom: 16px; border-bottom: 1px solid var(--line); margin-bottom: 22px; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .brand-mark { width: 40px; height: 40px; background: linear-gradient(135deg, var(--accent-3), var(--accent-2)); display: grid; place-items: center; color: var(--ink); font-weight: 700; font-family: 'IBM Plex Mono', monospace; font-size: 13px; border-radius: 12px; line-height: 1.1; text-align: center;}
+  .brand .t1 { font-weight: 600; font-size: 15px; line-height: 1.2; }
+  .brand .t2 { font-size: 11px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.04em; margin-top: 2px; }
+  .topbar .right { display: flex; align-items: center; gap: 18px; }
+  .live-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--paper); border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-family: 'IBM Plex Mono', monospace; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--under); position: relative; }
+  .live-dot::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; background: var(--under); opacity: 0.35; animation: pulse 1.8s ease-out infinite; }
+  @keyframes pulse { 0% { transform: scale(0.8); opacity: 0.5; } 100% { transform: scale(2.2); opacity: 0; } }
+  .sync-meta { font-size: 11px; font-family: 'IBM Plex Mono', monospace; color: var(--muted); text-align: right; line-height: 1.55; }
+  .sync-meta b { color: var(--ink); font-weight: 600; }
+
+  /* page header */
+  .page-head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 22px; gap: 20px; flex-wrap: wrap; }
+  .page-head h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  .page-head .crumb { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .page-head .sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .filter-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { padding: 6px 14px; font-size: 12px; border: 1px solid var(--line); background: var(--paper); border-radius: 999px; cursor: pointer; }
+  .chip.on { background: var(--accent-3); color: var(--ink); border-color: var(--accent-3); font-weight: 500; }
+
+  /* section heads */
+  .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin: 10px 0 12px; }
+  .sec-head h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); }
+  .sec-head h2 .badge { display: inline-block; margin-right: 8px; width: 24px; height: 24px; background: var(--accent); color: var(--ink); border-radius: 8px; text-align: center; line-height: 24px; font-size: 11px; font-family: 'IBM Plex Mono', monospace; vertical-align: middle; font-weight: 600; }
+  .sec-head h2 .badge.b { background: var(--accent-3); }
+  .sec-head .meta { font-size: 11px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
+
+  /* grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 14px;
+  }
+  .card {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    padding: 18px 20px;
+    border-radius: 14px;
+    position: relative;
+    box-shadow: 0 1px 2px rgba(155, 143, 168, 0.06);
+  }
+  .card h3 {
+    margin: 0 0 4px 0;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .card .sub { font-size: 11px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
+
+  /* HERO: overall % vs both targets */
+  .card.hero { grid-column: span 5; background: linear-gradient(135deg, #a4c8ec 0%, #f6c1d4 50%, #f9d9a8 100%); color: var(--ink); border: none; padding: 22px 24px; }
+  .card.hero h3 { color: rgba(58,54,84,0.7); }
+  .card.hero .big { font-size: 64px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; margin: 10px 0 4px; font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+  .card.hero .sub { color: rgba(58,54,84,0.75); font-size: 12px; }
+  .card.hero .target-track { position: relative; height: 14px; background: rgba(255,255,255,0.55); margin-top: 22px; border-radius: 999px; overflow: visible; }
+  .card.hero .target-track i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--paper); transition: width 0.8s ease; border-radius: 999px; }
+  .target-marker { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--ink); opacity: 0.6; }
+  .target-marker .lbl { position: absolute; top: -22px; transform: translateX(-50%); font-size: 10px; font-family: 'IBM Plex Mono', monospace; white-space: nowrap; padding: 2px 8px; background: var(--paper); color: var(--ink); border-radius: 999px; box-shadow: 0 1px 2px rgba(58,54,84,0.12); }
+  .target-marker.fail .lbl { background: var(--over); color: var(--paper); }
+  .target-axis { display: flex; justify-content: space-between; font-size: 10px; font-family: 'IBM Plex Mono', monospace; opacity: 0.65; margin-top: 8px; }
+  .hero-status { display: flex; gap: 10px; margin-top: 18px; }
+  .status-pill { flex: 1; padding: 10px 14px; background: rgba(255,255,255,0.55); border-radius: 12px; font-size: 12px; }
+  .status-pill .lbl { font-size: 10px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 2px; }
+  .status-pill .v { display: flex; align-items: center; gap: 6px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+  .status-pill.pass { background: rgba(168,216,160,0.65); }
+  .status-pill.fail { background: rgba(239,154,138,0.5); }
+  .status-pill .icon { font-size: 14px; }
+
+  /* KPI strip */
+  .card.kpi { grid-column: span 7; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; padding: 0; overflow: hidden; }
+  .kpi-cell { padding: 18px 22px; border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+  .kpi-cell:last-child { border-right: none; }
+  .kpi-cell .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); font-weight: 500; }
+  .kpi-cell .v { font-size: 28px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; letter-spacing: -0.02em; margin-top: 6px; line-height: 1.05; }
+  .kpi-cell .v small { font-size: 14px; color: var(--muted); margin-left: 4px; }
+  .kpi-cell .d { font-size: 11px; font-family: 'IBM Plex Mono', monospace; color: var(--muted); margin-top: 4px; }
+  .kpi-cell .d.pos { color: var(--under); }
+  .kpi-cell .d.neg { color: var(--over); }
+  .kpi-cell .badge-row { margin-top: auto; padding-top: 10px; }
+  .kpi-cell .new-badge { display: inline-block; padding: 2px 8px; background: var(--hl); color: var(--accent); font-size: 11px; border-radius: 999px; font-family: 'IBM Plex Mono', monospace; }
+  .kpi-cell .new-badge.warn { background: #fdf0e3; color: #b87a1f; }
+  .kpi-cell .new-badge.muted { background: var(--soft); color: var(--muted); }
+
+  /* SECTION A — RAYSAI bars */
+  .card.raysai { grid-column: span 12; }
+  .raysai-bars { display: grid; grid-template-columns: repeat(11, 1fr); gap: 10px; align-items: end; height: 220px; padding: 12px 0 6px; border-bottom: 1px solid var(--line-soft); position: relative; }
+  .raysai-bars::before, .raysai-bars::after { content: ""; position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); pointer-events: none; }
+  .raysai-bars::before { top: 25%; }
+  .raysai-bars::after { top: 50%; }
+  .ydash { position: absolute; left: 0; right: 0; pointer-events: none; }
+  .target-line-69 { border-top: 1.5px dashed var(--accent); }
+  .target-line-75 { border-top: 1.5px dashed var(--over); }
+  .target-tag { position: absolute; right: 0; transform: translateY(-50%); font-size: 10px; padding: 2px 6px; background: var(--paper); border: 1px solid var(--line); border-radius: 3px; font-family: 'IBM Plex Mono', monospace; }
+  .target-tag.kgrm { color: var(--accent); border-color: var(--accent); }
+  .target-tag.so { color: var(--over); border-color: var(--over); }
+  .raybar { display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; }
+  .raybar .pct { font-size: 11px; font-family: 'IBM Plex Mono', monospace; font-weight: 600; color: var(--ink); }
+  .raybar .b { width: 100%; max-width: 56px; background: var(--accent); border-radius: 8px 8px 0 0; transition: height 0.7s ease; min-height: 2px; }
+  .raybar.miss-both .b { background: var(--over); }
+  .raybar.pass-grm .b { background: var(--accent-2); }
+  .raybar.pass-so .b { background: var(--under); }
+  .raybar .lbl { font-size: 10px; line-height: 1.15; color: var(--muted); text-align: center; height: 28px; overflow: hidden; }
+  .raysai-bars-wrap { position: relative; }
+  .raysai-foot { display: flex; gap: 22px; margin-top: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+  .raysai-foot span { display: inline-flex; align-items: center; gap: 6px; font-family: 'IBM Plex Mono', monospace; }
+  .raysai-foot .sw { width: 10px; height: 10px; border-radius: 2px; }
+
+  /* B — cash flow row */
+  .card.cash-hero { grid-column: span 12; padding: 0; display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 0; overflow: hidden; }
+  .cash-cell { padding: 20px 24px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+  .cash-cell:last-child { border-right: none; }
+  .cash-cell.title { background: var(--soft); justify-content: center; }
+  .cash-cell.title .t { font-size: 14px; font-weight: 600; }
+  .cash-cell.title .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .cash-cell.title .meta { font-size: 11px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; margin-top: 8px; }
+  .cash-cell .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); font-weight: 500; }
+  .cash-cell .vbig { font-size: 26px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; letter-spacing: -0.02em; line-height: 1.1; }
+  .cash-cell .unit { font-size: 12px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
+  .cash-cell.income .vbig { color: var(--under); }
+  .cash-cell.expense .vbig { color: var(--over); }
+  .cash-cell.profit .vbig { color: var(--accent-2); }
+
+  /* B - balances + breakdown */
+  .card.balances { grid-column: span 5; }
+  .balance-row { display: grid; grid-template-columns: 1fr auto; padding: 10px 0; border-bottom: 1px solid var(--line-soft); align-items: baseline; }
+  .balance-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .balance-row .name { font-size: 13px; }
+  .balance-row .name .nb { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .balance-row .v { font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 14px; text-align: right; }
+  .balance-row .v small { font-size: 11px; color: var(--muted); font-weight: 400; }
+  .balance-row.total { border-top: 2px solid var(--ink); border-bottom: none; padding-top: 12px; margin-top: 6px; }
+  .balance-row.total .name { font-weight: 600; font-size: 14px; }
+  .balance-row.total .v { font-size: 18px; color: var(--accent); }
+
+  .card.donuts { grid-column: span 7; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .donut-block h3 { margin-bottom: 10px; }
+  .donut-block { display: grid; grid-template-columns: 110px 1fr; gap: 14px; align-items: center; }
+  .donut-svg { width: 100%; }
+  .legend-list { font-size: 11px; }
+  .legend-list .lr { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: center; padding: 3px 0; }
+  .legend-list .sw { width: 10px; height: 10px; border-radius: 2px; }
+  .legend-list .v { font-family: 'IBM Plex Mono', monospace; font-weight: 600; }
+
+  /* feed + recommendation */
+  .card.feed { grid-column: span 7; padding: 0; display: flex; flex-direction: column; }
+  .feed-head { padding: 16px 20px 12px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+  .feed-head h3 { margin: 0; }
+  .feed-head .count { font-size: 11px; font-family: 'IBM Plex Mono', monospace; color: var(--accent); background: var(--hl); padding: 2px 10px; border-radius: 999px; font-weight: 600; }
+  .feed-list { flex: 1; max-height: 360px; overflow: hidden; }
+  .feed-item { padding: 12px 20px; border-bottom: 1px solid var(--line-soft); display: grid; grid-template-columns: 36px 1fr auto; gap: 12px; align-items: flex-start; transition: background 0.4s; }
+  .feed-item:last-child { border-bottom: none; }
+  .feed-item.fresh { animation: fadeFresh 5s ease-out forwards; }
+  @keyframes fadeFresh { 0% { background: #d2ecdf; } 100% { background: var(--paper); } }
+  .feed-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--soft); display: grid; place-items: center; font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid var(--line); }
+  .feed-avatar.sys { background: var(--hl); color: var(--accent); }
+  .feed-body .who { font-size: 12px; font-weight: 600; }
+  .feed-body .what { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.45; }
+  .feed-body .what b { color: var(--ink); font-weight: 500; }
+  .feed-body .what .num { color: var(--ink); font-weight: 500; }
+  .feed-time { font-size: 10px; font-family: 'IBM Plex Mono', monospace; color: var(--muted); white-space: nowrap; }
+  .feed-foot { padding: 10px 20px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); text-align: center; cursor: pointer; }
+  .feed-foot:hover { color: var(--ink); background: var(--soft); }
+
+  .card.advice { grid-column: span 5; }
+  .advice-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .advice-list li { padding: 10px 12px; background: var(--soft); border-left: 3px solid var(--accent); font-size: 12px; line-height: 1.55; border-radius: 0 4px 4px 0; }
+  .advice-list li.warn { border-left-color: var(--warn); background: #fdf6ea; }
+  .advice-list li.alert { border-left-color: var(--over); background: #fdf0eb; }
+  .advice-list li b { display: block; margin-bottom: 2px; font-weight: 600; }
+
+  /* footer */
+  .docfoot { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted); }
+  .docfoot a { color: var(--accent); text-decoration: none; }
+
+  @media (max-width: 1100px) {
+    .card.hero, .card.kpi, .card.raysai, .card.cash-hero, .card.balances, .card.donuts, .card.feed, .card.advice { grid-column: 1 / -1; }
+    .card.donuts { grid-template-columns: 1fr; }
+    .card.cash-hero { grid-template-columns: 1fr 1fr; }
+    .raysai-bars { grid-template-columns: repeat(11, minmax(36px, 1fr)); overflow-x: auto; }
+  }
+
+  @media print {
+    .live-pill, .filter-row { display: none; }
+    body { background: white; }
+    .card { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">ศอ.<br/>10</div>
+      <div>
+        <div class="t1">ศูนย์อนามัยที่ 10 อุบลราชธานี · กรมอนามัย</div>
+        <div class="t2">DASHBOARD · เบิกจ่ายงบประมาณ + เงินบำรุง · FY 2569</div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="live-pill"><span class="live-dot"></span><span>LIVE · GFMIS</span></div>
+      <div class="sync-meta">
+        <div>อัปเดตล่าสุด <b id="lastSync">9:59 น.</b> · 7 พ.ค. 2569</div>
+        <div>โดย <b>กลุ่มการเงิน บัญชีและพัสดุ</b></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-head">
+    <div>
+      <div class="crumb">FY 2569 · 1 ต.ค. 2568 — 7 พ.ค. 2569</div>
+      <h1>ภาพรวมเบิกจ่ายและกระแสเงินสด</h1>
+      <div class="sub">รวม 2 รายงานประจำวันที่ทีมส่งในไลน์: เบิกจ่ายงบประมาณ + รับ-จ่ายเงินบำรุง</div>
+    </div>
+    <div class="filter-row">
+      <div class="chip">วันนี้</div>
+      <div class="chip">สัปดาห์นี้</div>
+      <div class="chip">เดือนนี้</div>
+      <div class="chip on">สะสมปีงบ</div>
+    </div>
+  </div>
+
+  <!-- ============ SECTION A: เบิกจ่ายงบประมาณ ============ -->
+  <div class="sec-head">
+    <h2><span class="badge">A</span> เบิกจ่ายงบประมาณ · เทียบเป้ากรม / ศอ.</h2>
+    <div class="meta">ที่มา · GFMIS · 11 สายงาน</div>
+  </div>
+
+  <div class="grid" style="margin-bottom: 22px;">
+
+    <!-- HERO: 69.68% with target markers -->
+    <div class="card hero">
+      <h3>ยอดเบิกจ่ายสะสมรวมทุกงบ</h3>
+      <div class="big"><span class="count-up" data-target="69.68" data-decimals="2">0.00</span>%</div>
+      <div class="sub">฿<span class="num">6,047,650.94</span> จาก ฿<span class="num">8,679,800</span></div>
+
+      <div class="target-track">
+        <i id="heroBar" style="width: 0%"></i>
+        <div class="target-marker pass" style="left: 69%;"><div class="lbl">เป้ากรม 69%</div></div>
+        <div class="target-marker fail" style="left: 75%;"><div class="lbl">เป้า ศอ. 75%</div></div>
+      </div>
+      <div class="target-axis"><span>0%</span><span>50%</span><span>100%</span></div>
+
+      <div class="hero-status">
+        <div class="status-pill pass">
+          <div class="lbl">เป้ากรมอนามัย 69%</div>
+          <div class="v"><span class="icon">✓</span> ผ่านแล้ว · +0.68%</div>
+        </div>
+        <div class="status-pill fail">
+          <div class="lbl">เป้า ศอ. 75%</div>
+          <div class="v"><span class="icon">✕</span> ยังขาด 5.32%</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI strip -->
+    <div class="card kpi">
+      <div class="kpi-cell">
+        <div class="lbl">งบดำเนินงาน</div>
+        <div class="v"><span class="count-up" data-target="65.58" data-decimals="2">0</span>%</div>
+        <div class="d">฿5,015,168.94 / ฿7,647,300</div>
+        <div class="badge-row"><span class="new-badge muted">ยังไม่ผ่านเป้า ศอ.</span></div>
+      </div>
+      <div class="kpi-cell">
+        <div class="lbl">งบลงทุน</div>
+        <div class="v" style="color: var(--under);"><span class="count-up" data-target="100" data-decimals="2">0</span>%</div>
+        <div class="d pos">เบิกจ่ายครบแล้ว</div>
+        <div class="badge-row"><span class="new-badge">✓ ผ่านทั้ง 2 เป้า</span></div>
+      </div>
+      <div class="kpi-cell">
+        <div class="lbl">วันนี้ (5 พ.ค.)</div>
+        <div class="v"><span style="color: var(--muted);">—</span></div>
+        <div class="d">ไม่มียอดเบิกจ่าย</div>
+        <div class="badge-row"><span class="new-badge muted">รายงานเย็น 6 พ.ค. 9:18</span></div>
+      </div>
+    </div>
+
+    <!-- RAYSAI bars chart -->
+    <div class="card raysai">
+      <div class="sec-head" style="margin: 0 0 6px;">
+        <h3 style="font-size: 13px; color: var(--ink); text-transform: none; letter-spacing: 0;">ร้อยละการเบิกจ่าย · รายสายบังคับบัญชา</h3>
+        <div class="meta">เปรียบเทียบเป้ากรม 69% · เป้า ศอ. 75%</div>
+      </div>
+      <div class="raysai-bars-wrap">
+        <div class="raysai-bars" id="raysaiBars">
+          <!-- bars injected by JS -->
+        </div>
+      </div>
+      <div class="raysai-foot">
+        <span><span class="sw" style="background: var(--under);"></span> ผ่านทั้ง 2 เป้า</span>
+        <span><span class="sw" style="background: var(--accent);"></span> ผ่านเป้ากรม</span>
+        <span><span class="sw" style="background: var(--over);"></span> ยังไม่ผ่านเป้ากรม</span>
+        <span style="margin-left: auto;">เส้นประเขียว = 69% · เส้นประส้ม = 75%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SECTION B: เงินบำรุง ============ -->
+  <div class="sec-head">
+    <h2><span class="badge b">B</span> รับ-จ่ายเงินบำรุง · กระแสเงินสด</h2>
+    <div class="meta">ณ 7 พ.ค. 2569 · งานบริหารบัญชี กลุ่มการเงิน บัญชีและพัสดุ</div>
+  </div>
+
+  <div class="grid" style="margin-bottom: 18px;">
+    <div class="card cash-hero">
+      <div class="cash-cell title">
+        <div class="t">เงินบำรุงคงเหลือ</div>
+        <div class="s">ออมทรัพย์ + เงินฝากคลัง</div>
+        <div class="vbig" style="margin-top: 8px; color: var(--accent);">฿14,648,616.01</div>
+        <div class="meta">ปีงบประมาณ 2569</div>
+      </div>
+      <div class="cash-cell income">
+        <div class="lbl">รายรับสะสม</div>
+        <div class="vbig">฿13,689,187.88</div>
+        <div class="unit">บาท · ปีงบ 2569</div>
+      </div>
+      <div class="cash-cell expense">
+        <div class="lbl">รายจ่ายสะสม</div>
+        <div class="vbig">฿12,242,892.24</div>
+        <div class="unit">บาท · ปีงบ 2569</div>
+      </div>
+      <div class="cash-cell profit">
+        <div class="lbl">กำไร / ขาดทุน</div>
+        <div class="vbig">฿1,446,295.64</div>
+        <div class="unit">กำไรสุทธิ</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-bottom: 22px;">
+    <!-- balances -->
+    <div class="card balances">
+      <h3>ยอดคงเหลือแยกประเภท</h3>
+      <div class="sub" style="margin-bottom: 10px;">เงินฝากธนาคารออมทรัพย์ และเงินฝากคลัง</div>
+
+      <div class="balance-row">
+        <div class="name">เงินฝากธนาคารออมทรัพย์<div class="nb">รับวันนี้ ฿12,227.50 · ไม่มียอดจ่าย</div></div>
+        <div class="v">฿2,752,260.86</div>
+      </div>
+      <div class="balance-row">
+        <div class="name">เงินฝากคลัง<div class="nb">รับ ฿11.95M · จ่าย ฿56,404.00 (วัสดุ + ค่าตอบแทน)</div></div>
+        <div class="v">฿11,896,355.15</div>
+      </div>
+      <div class="balance-row total">
+        <div class="name">รวมเงินบำรุงคงเหลือ</div>
+        <div class="v">฿14,648,616.01</div>
+      </div>
+
+      <div style="margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line);">
+        <div style="font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px;">รายรับวันนี้ · จำแนก</div>
+        <div style="display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 12px;">
+          <div>รักษาพยาบาลทันตกรรม</div><div class="num">4,630.00</div>
+          <div>OPD</div><div class="num">2,827.50</div>
+          <div>นวดแผนไทย</div><div class="num">2,200.00</div>
+          <div>คลินิก DPAC</div><div class="num">2,060.00</div>
+          <div>ร่วมจ่าย UC</div><div class="num">360.00</div>
+          <div>ตรวจสุขภาพเชิงรุก</div><div class="num">100.00</div>
+          <div>กายภาพบำบัด</div><div class="num">50.00</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- donuts -->
+    <div class="card donuts">
+      <div>
+        <h3>สัดส่วนรายรับ</h3>
+        <div class="donut-block">
+          <svg class="donut-svg" id="donutIncome" viewBox="-1.1 -1.1 2.2 2.2"></svg>
+          <div class="legend-list" id="legendIncome"></div>
+        </div>
+      </div>
+      <div>
+        <h3>สัดส่วนรายจ่าย · จากเงินฝากคลัง</h3>
+        <div class="donut-block">
+          <svg class="donut-svg" id="donutExpense" viewBox="-1.1 -1.1 2.2 2.2"></svg>
+          <div class="legend-list" id="legendExpense"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SECTION C: feed + advice ============ -->
+  <div class="sec-head">
+    <h2 style="text-transform: uppercase;"><span class="badge" style="background: var(--ink);">C</span> Activity & ข้อเสนอแนะ</h2>
+    <div class="meta">รวมจากรายงานในไลน์ + GFMIS sync</div>
+  </div>
+
+  <div class="grid">
+    <div class="card feed">
+      <div class="feed-head">
+        <h3>Activity · การอัปเดตล่าสุด</h3>
+        <span class="count" id="feedCount">รวมวันนี้</span>
+      </div>
+      <div class="feed-list" id="feedList"></div>
+      <div class="feed-foot">ดูประวัติทั้งหมด ↗</div>
+    </div>
+
+    <div class="card advice">
+      <h3>บทสรุปและข้อเสนอแนะสำหรับผู้บริหาร</h3>
+      <div class="sub" style="margin-bottom: 12px;">จากผลรับ-จ่ายเงินบำรุง · ปีงบ 2569</div>
+      <ul class="advice-list">
+        <li class="alert">
+          <b>▲ ค่าวัสดุสำนักงาน คิดเป็น 42.6% ของรายจ่าย</b>
+          ควบคุมค่าใช้จ่ายในหมวดวัสดุสำนักงานอย่างต่อเนื่อง เพื่อเพิ่มประสิทธิภาพการบริหารเงินบำรุง
+        </li>
+        <li class="warn">
+          <b>● งบดำเนินงาน 65.58% — ยังไม่ผ่านเป้า ศอ. 75%</b>
+          เร่งเบิกจ่ายในไตรมาสที่เหลือ โดยเฉพาะ "ผู้อำนวยการ" (49.13%) และ "การกิจสนับสนุนวิชาการ" (50.68%)
+        </li>
+        <li>
+          <b>✓ รายได้หลัก · ทันตกรรม 37.8%</b>
+          เป็นรายได้หลักรองรับ OPD (23.1%) และนวดแผนไทย (18.0%) — แนวโน้มดี รักษาระดับการให้บริการ
+        </li>
+        <li>
+          <b>✓ กำไรสุทธิ ฿1.45 ล้านบาท · เงินบำรุงคงเหลือ ฿14.65 ล้านบาท</b>
+          สถานะการเงินแข็งแรง สามารถจัดสรรเพื่อการลงทุนหรือพัฒนาบริการเพิ่มเติมได้
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="docfoot">
+    <span>BUDGET-RT-DASHBOARD · v2.0 · GFMIS sync ทุก 5 นาที · ที่มาข้อมูล: รายงานไลน์ทีม + งานการเงิน</span>
+    <span id="footTime">07 พ.ค. 2569 · —</span>
+  </div>
+</div>
+
+<script>
+  const fmt = n => Math.round(n).toLocaleString('th-TH');
+  const fmtN = (n, d = 2) => Number(n).toFixed(d);
+
+  // ====================================================================
+  // LIVE DATA · ตั้งค่า URL ของ Apps Script Web App ที่นี่
+  // ดูวิธีติดตั้งที่ apps-script/SETUP.md
+  // ====================================================================
+  const API_URL = ''; // <-- วาง Web app URL ที่ deploy จาก Apps Script
+  const REFRESH_MS = 5 * 60 * 1000; // refresh ทุก 5 นาที
+
+  async function fetchLive() {
+    if (!API_URL) return null;
+    try {
+      const res = await fetch(API_URL, { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const pill = document.querySelector('.live-pill');
+      if (pill) pill.innerHTML = '<span class="live-dot"></span><span>LIVE · GFMIS</span>';
+      return data;
+    } catch (err) {
+      console.warn('fetchLive failed, using demo data:', err);
+      const pill = document.querySelector('.live-pill');
+      if (pill) pill.innerHTML = '<span class="live-dot" style="background:#d96a4a"></span><span>OFFLINE · ใช้ข้อมูลตัวอย่าง</span>';
+      return null;
+    }
+  }
+
+  function applyLive(data) {
+    if (!data) return;
+    // summary
+    if (data.summary) {
+      const s = data.summary;
+      if (s['ยอดรวม_pct']) {
+        document.querySelector('.card.hero .big').innerHTML =
+          `<span>${Number(s['ยอดรวม_pct']).toFixed(2)}</span>%`;
+        const bar = document.getElementById('heroBar');
+        if (bar) bar.style.width = Number(s['ยอดรวม_pct']) + '%';
+      }
+      if (s['ยอดรวม_actual'] && s['ยอดรวม_budget']) {
+        document.querySelector('.card.hero .sub').innerHTML =
+          `฿<span class="num">${fmt(s['ยอดรวม_actual'])}</span> จาก ฿<span class="num">${fmt(s['ยอดรวม_budget'])}</span>`;
+      }
+    }
+    // by-line bars
+    if (Array.isArray(data.byLine) && data.byLine.length) {
+      raysai.length = 0;
+      data.byLine.forEach(r => raysai.push(r));
+      renderRaysai();
+    }
+    // donuts
+    if (Array.isArray(data.incomeCat) && data.incomeCat.length) {
+      renderDonut('donutIncome', 'legendIncome',
+        data.incomeCat.map((d, i) => ({ ...d, c: d.c || incomeData[i % incomeData.length].c })));
+    }
+    if (Array.isArray(data.expenseCat) && data.expenseCat.length) {
+      renderDonut('donutExpense', 'legendExpense',
+        data.expenseCat.map((d, i) => ({ ...d, c: d.c || expenseData[i % expenseData.length].c })));
+    }
+    // activity feed
+    if (Array.isArray(data.activity) && data.activity.length) {
+      feed.length = 0;
+      data.activity.forEach(a => feed.push({
+        who: a.who, verb: a.verb, what: a.what, amt: a.amt,
+        time: new Date(a.timestamp).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }),
+        tag: a.tag,
+      }));
+      renderFeed();
+    }
+    // last sync
+    const ls = document.getElementById('lastSync');
+    if (ls) ls.textContent = new Date().toLocaleTimeString('th-TH');
+  }
+
+  async function refreshLoop() {
+    const data = await fetchLive();
+    applyLive(data);
+    setTimeout(refreshLoop, REFRESH_MS);
+  }
+  if (API_URL) refreshLoop();
+
+  // ---------- count up ----------
+  function countUp() {
+    document.querySelectorAll('.count-up').forEach(el => {
+      const target = parseFloat(el.dataset.target);
+      const decimals = el.dataset.decimals ? parseInt(el.dataset.decimals) : 0;
+      const t0 = performance.now();
+      const dur = 1100;
+      function step(t) {
+        const p = Math.min(1, (t - t0) / dur);
+        const eased = 1 - Math.pow(1 - p, 3);
+        const v = target * eased;
+        el.textContent = decimals > 0 ? v.toFixed(decimals) : Math.round(v);
+        if (p < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    });
+    setTimeout(() => {
+      const bar = document.getElementById('heroBar');
+      if (bar) bar.style.width = '69.68%';
+    }, 150);
+  }
+
+  // ---------- ราย-สาย bars ----------
+  const raysai = [
+    { name: 'ผู้อำนวยการ',                         pct: 49.13 },
+    { name: 'ภารกิจส่งเสริมสุขภาพ',                 pct: 82.79 },
+    { name: 'การกิจสิ่งแวดล้อม',                    pct: 65.88 },
+    { name: 'สายสนับสนุน',                          pct: 63.94 },
+    { name: 'ขับเคลื่อน HWP (G&CH+)',               pct: 81.39 },
+    { name: 'การกิจสนับสนุนวิชาการ',                pct: 78.61 },
+    { name: 'การกิจสนับสนุนวิชาการ (จัด)',         pct: 85.60 },
+    { name: 'ไปราชการ',                             pct: 50.68 },
+    { name: 'ค่าใช้จ่ายตามสิทธิ์',                  pct: 0.35 },
+    { name: 'ตั้งเงินโครงการ',                      pct: 65.58 },
+    { name: 'งบลงทุน',                              pct: 100.00 },
+  ];
+  function classifyBar(p) {
+    if (p >= 75) return 'pass-so';
+    if (p >= 69) return 'pass-grm';
+    return 'miss-both';
+  }
+  function renderRaysai() {
+    const wrap = document.getElementById('raysaiBars');
+    wrap.innerHTML = raysai.map(r => {
+      const h = Math.max(2, r.pct); // % of 100 chart height
+      return `<div class="raybar ${classifyBar(r.pct)}">
+        <div class="pct">${fmtN(r.pct, r.pct === 100 ? 0 : 2)}%</div>
+        <div class="b" style="height: 0%" data-h="${h}"></div>
+        <div class="lbl">${r.name}</div>
+      </div>`;
+    }).join('');
+    // animate bars
+    requestAnimationFrame(() => {
+      wrap.querySelectorAll('.b').forEach(b => {
+        const h = parseFloat(b.dataset.h);
+        b.style.height = h + '%';
+      });
+    });
+  }
+
+  // ---------- donuts ----------
+  const incomeData = [
+    { l: 'รักษาพยาบาล OPD',   v: 23.1, c: '#a8d8a0' },
+    { l: 'ทันตกรรม',           v: 37.8, c: '#c4b5e0' },
+    { l: 'นวดแผนไทย',          v: 18.0, c: '#a4c8ec' },
+    { l: 'DPAC',               v: 16.9, c: '#7cc5b7' },
+    { l: 'UC',                 v: 2.9,  c: '#f5cf85' },
+    { l: 'กายภาพบำบัด',         v: 0.8,  c: '#ef9a8a' },
+    { l: 'ตรวจสุขภาพ',          v: 0.8,  c: '#f6c1d4' },
+  ];
+  const expenseData = [
+    { l: 'ค่าวัสดุสำนักงาน',     v: 42.6, c: '#ef9a8a' },
+    { l: 'ค่าตอบแทนอ่านผลงานฯ',  v: 28.3, c: '#a4c8ec' },
+    { l: 'ค่าวัสดุทันตกรรม',     v: 16.3, c: '#f5cf85' },
+    { l: 'ค่าวัสดุงานบ้าน',      v: 9.1,  c: '#f9d9a8' },
+    { l: 'ค่าวัสดุไฟฟ้า',        v: 2.8,  c: '#c4b5e0' },
+    { l: 'ค่าวัสดุบริโภค',       v: 0.6,  c: '#a8d8a0' },
+  ];
+  function renderDonut(svgId, legendId, data) {
+    const svg = document.getElementById(svgId);
+    const legend = document.getElementById(legendId);
+    const total = data.reduce((s, d) => s + d.v, 0);
+    let acc = 0;
+    let paths = '';
+    data.forEach(d => {
+      const start = acc / total;
+      acc += d.v;
+      const end = acc / total;
+      const a0 = start * Math.PI * 2 - Math.PI / 2;
+      const a1 = end * Math.PI * 2 - Math.PI / 2;
+      const x0 = Math.cos(a0), y0 = Math.sin(a0);
+      const x1 = Math.cos(a1), y1 = Math.sin(a1);
+      const large = (end - start) > 0.5 ? 1 : 0;
+      paths += `<path d="M ${x0} ${y0} A 1 1 0 ${large} 1 ${x1} ${y1} L ${x1*0.55} ${y1*0.55} A 0.55 0.55 0 ${large} 0 ${x0*0.55} ${y0*0.55} Z" fill="${d.c}"/>`;
+    });
+    svg.innerHTML = paths;
+    legend.innerHTML = data.map(d =>
+      `<div class="lr"><span class="sw" style="background:${d.c}"></span><span>${d.l}</span><span class="v">${d.v}%</span></div>`
+    ).join('');
+  }
+
+  // ---------- activity feed ----------
+  const initials = (n) => {
+    if (n === 'ระบบ GFMIS') return 'GF';
+    const parts = n.split(/\s+/);
+    return (parts[0]?.[0] || '') + (parts[1]?.[0] || '');
+  };
+  const feed = [
+    { who: 'ทีมการเงิน',  verb: 'ส่งรายงาน', what: 'รับ-จ่ายเงินบำรุง (กระแสเงินสด)', tag: '@All คกก.', time: '7 พ.ค. · 09:18', fresh: true },
+    { who: 'งานพัสดุ',   verb: 'sync', what: 'GFMIS · สถานะเบิกจ่ายรายสายงาน', tag: 'อัตโนมัติ', time: '7 พ.ค. · 09:59' },
+    { who: 'ทีมงบประมาณ', verb: 'รายงาน', what: 'สถานะเบิกจ่าย ประจำวัน 5 พ.ค.', tag: 'ไม่มียอดเบิกจ่าย', time: '6 พ.ค. · 09:18' },
+    { who: 'การเงิน',    verb: 'บันทึกจ่าย', what: 'ค่าตอบแทนอ่านผลงานตีพิมพ์', amt: 24000, time: '6 พ.ค. · 16:42' },
+    { who: 'พัสดุ',      verb: 'บันทึกจ่าย', what: 'ค่าวัสดุสำนักงาน', amt: 16106, time: '6 พ.ค. · 14:18' },
+    { who: 'พัสดุ',      verb: 'บันทึกจ่าย', what: 'ค่าวัสดุทันตกรรม', amt: 9200, time: '6 พ.ค. · 11:30' },
+    { who: 'OPD',        verb: 'บันทึกรับ', what: 'รายได้รักษาพยาบาลทันตกรรม', amt: 4630, time: '5 พ.ค. · 16:00' },
+    { who: 'ระบบ GFMIS',  verb: 'sync อัตโนมัติ', what: '8 รายการ · เงินฝากคลัง', time: '5 พ.ค. · 15:30' },
+  ];
+  function renderFeed() {
+    const list = document.getElementById('feedList');
+    list.innerHTML = feed.map(f => {
+      const isSys = f.who === 'ระบบ GFMIS';
+      return `
+      <div class="feed-item ${f.fresh ? 'fresh' : ''}">
+        <div class="feed-avatar ${isSys ? 'sys' : ''}">${initials(f.who)}</div>
+        <div class="feed-body">
+          <div class="who">${f.who}</div>
+          <div class="what">${f.verb} <b>${f.what}</b>${f.amt ? ` · <span class="num">฿${fmt(f.amt)}</span>` : ''}${f.tag ? ` · <em style="color:var(--accent);font-style:normal;">${f.tag}</em>` : ''}</div>
+        </div>
+        <div class="feed-time">${f.time}</div>
+      </div>`;
+    }).join('');
+    document.getElementById('feedCount').textContent = `รวม ${feed.length} รายการ`;
+  }
+
+  // ---------- live last-sync ticker ----------
+  const tickers = ['9:59 น.', '10:00 น. (ไม่กี่วินาทีที่แล้ว)', '10:00 น. (กำลัง sync)', '10:00 น. (เพิ่งอัปเดต)'];
+  let tIdx = 0;
+  setInterval(() => {
+    tIdx = (tIdx + 1) % tickers.length;
+    const el = document.getElementById('lastSync');
+    if (el) el.textContent = tickers[tIdx];
+  }, 3500);
+
+  // footer clock
+  function tickClock() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const t = `07 พ.ค. 2569 · ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    const el = document.getElementById('footTime');
+    if (el) el.textContent = t;
+  }
+  setInterval(tickClock, 1000);
+  tickClock();
+
+  // boot
+  renderRaysai();
+  renderDonut('donutIncome', 'legendIncome', incomeData);
+  renderDonut('donutExpense', 'legendExpense', expenseData);
+  renderFeed();
+  countUp();
+</script>
+
+</body>
+</html>
